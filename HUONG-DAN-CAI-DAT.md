@@ -25,7 +25,7 @@ Kiểm tra: `node -v` (phải ≥ v18) và `git --version`.
 2. Tạo repo mới trên GitHub tên **`tu-luyen-thi-cntt-utc-mnha`**, để **Public**
    (GitHub Pages miễn phí chỉ chạy với repo public; repo này **không chứa bí mật** vì `.env` đã bị `.gitignore` chặn; dữ liệu người dùng nằm ở các repo private khác).
    Đừng tick "Add a README" hay `.gitignore` (repo phải trống).
-3. Trong thư mục vừa giải nén:
+3. Mở terminal **ngay trong thư mục gốc vừa giải nén** (thư mục chứa `index.html`, `css`, `js`, `backend`), **không** đứng trong `backend`:
    ```bash
    git init -b main
    git add .
@@ -33,7 +33,9 @@ Kiểm tra: `node -v` (phải ≥ v18) và `git --version`.
    git remote add origin https://github.com/TEN_GITHUB/tu-luyen-thi-cntt-utc-mnha.git
    git push -u origin main
    ```
-4. Kiểm tra: trên trang repo **không** thấy file `.env`, chỉ có `backend/.env.example`.
+4. Kiểm tra trước khi commit: `git ls-files | findstr /i env` (Windows) hoặc `git ls-files | grep -i env` phải chỉ ra `backend/.env.example` và `backend/scripts/env.js`, **không** có `backend/.env`. Nếu có `.env` thì bạn đang đứng sai thư mục, hãy dừng lại.
+
+> Cấu trúc repo: giao diện (`index.html`, `404.html`, `config.js`, `css/`, `js/`, `img/`) nằm ngay ở **thư mục gốc** để GitHub Pages phục vụ được; backend nằm trong `backend/` và chỉ chạy trên Vercel.
 
 ### 0.2. Tạo token GitHub
 
@@ -179,14 +181,26 @@ Kiểm tra webhook: GitHub → repo `…-account` → *Settings → Webhooks* �
 
 ### C. Triển khai Frontend lên GitHub Pages
 
-1. Repo `tu-luyen-thi-cntt-utc-mnha` → *Settings → Pages* → **Source: GitHub Actions**.
-2. *Settings → Secrets and variables → Actions → tab **Variables** → New repository variable*:
-   - Name: `API_BASE_URL`
-   - Value: `https://TEN_PROJECT.vercel.app` (không có `/` cuối)
-3. Tab **Actions** → workflow *Deploy frontend to GitHub Pages* → **Run workflow** (hoặc push một commit bất kỳ vào `main`).
-4. Chờ xanh ✔, mở `https://TEN_GITHUB.github.io/tu-luyen-thi-cntt-utc-mnha/`.
+Giao diện là các file tĩnh nằm ở thư mục gốc, không cần build, không cần Actions.
 
-> Cách không dùng biến: sửa tay `frontend/config.js` thành `API_BASE: 'https://TEN_PROJECT.vercel.app'`, commit và push.
+1. Mở file `config.js` ở thư mục gốc, sửa dòng `API_BASE` thành địa chỉ Vercel của bạn (không có `/` cuối):
+   ```js
+   window.APP_CONFIG = {
+     API_BASE: 'https://TEN_PROJECT.vercel.app',
+   };
+   ```
+2. Commit và push:
+   ```bash
+   git add config.js
+   git commit -m "set API_BASE"
+   git push
+   ```
+3. Repo `tu-luyen-thi-cntt-utc-mnha` → *Settings → Pages* → mục **Build and deployment**:
+   - Source: **Deploy from a branch**
+   - Branch: **main**, thư mục **/ (root)** → Save.
+4. Đợi 1–2 phút (tab *Actions* sẽ hiện một lượt "pages build and deployment" chạy xong), rồi mở `https://TEN_GITHUB.github.io/tu-luyen-thi-cntt-utc-mnha/`.
+
+Trang dùng đường dẫn dạng `#/...` (ví dụ `.../tu-luyen-thi-cntt-utc-mnha/#/history`) nên đổi trang hay F5 đều không bị 404. Nếu ai gõ thẳng một đường dẫn kiểu `/tu-luyen-thi-cntt-utc-mnha/essay/abc`, file `404.html` sẽ tự chuyển sang dạng `#/essay/abc`.
 
 ### D. Dùng thử
 
@@ -203,7 +217,7 @@ Tự chạy mỗi ngày bằng Vercel Cron (khai báo trong `backend/vercel.json
 - Gọi thử qua web: `curl -H "Authorization: Bearer CRON_SECRET" "https://TEN_PROJECT.vercel.app/api/cron/prune?dry=1"`
 
 ### F. Cập nhật sau này
-`git push` lên `main`: Vercel tự triển khai lại backend; Pages tự triển khai lại nếu có đổi trong `frontend/`.
+`git push` lên `main`: Vercel tự triển khai lại backend; Pages tự cập nhật sau mỗi lần push.
 
 ---
 
@@ -259,9 +273,9 @@ Backend trên máy vẫn dùng **GitHub thật** (cần token và repo), nên v�
    node scripts/setup-github.js     # lần đầu: tạo repo (sẽ báo "bỏ qua webhook", bình thường)
    npm start                        # API tại http://localhost:3000/api/health
    ```
-3. Terminal khác, chạy frontend:
+3. Terminal khác, chạy giao diện từ **thư mục gốc** của dự án:
    ```bash
-   cd frontend
+   cd ..
    ```
    Sửa `config.js` thành `API_BASE: 'http://localhost:3000'`, rồi:
    ```bash
@@ -269,20 +283,20 @@ Backend trên máy vẫn dùng **GitHub thật** (cần token và repo), nên v�
    ```
    Mở `http://localhost:8080`.
 4. Chạy bộ test tự động (dùng GitHub giả, không cần mạng): `cd backend && npm test`.
-5. Trước khi commit, **nhớ trả `frontend/config.js` về `TEN-PROJECT.vercel.app`** (hoặc để workflow tự ghi đè từ `API_BASE_URL`).
+5. Trước khi commit, **nhớ sửa `config.js` về địa chỉ Vercel thật** (không để `http://localhost:3000`).
 
 ---
 
 ## Khi đổi tên repo hoặc dùng tên miền riêng
 - Đổi tên repo dữ liệu: đặt `ACCOUNT_GITHUB_REPO`, `DATA_GITHUB_REPO`, `IMAGE_REPO_PREFIX` trên Vercel **trước khi** có dữ liệu, rồi chạy lại `setup-github.js`.
 - Tên miền riêng cho Pages (ví dụ `https://luyenthi.example.com`): thêm origin đó vào `FRONTEND_ORIGINS` (cách nhau dấu phẩy) và Redeploy.
-- Tên miền riêng cho backend: cập nhật `PUBLIC_API_URL`, biến `API_BASE_URL` của Pages, rồi chạy lại `setup-github.js` để webhook trỏ về địa chỉ mới.
+- Tên miền riêng cho backend: cập nhật `PUBLIC_API_URL`, `API_BASE` trong `config.js`, rồi chạy lại `setup-github.js` để webhook trỏ về địa chỉ mới.
 
 ## Lỗi thường gặp
 
 | Triệu chứng | Nguyên nhân / cách sửa |
 |---|---|
-| Trang báo "Chưa cấu hình backend" | `API_BASE` vẫn là `TEN-PROJECT`. Đặt biến `API_BASE_URL` (bước C) rồi chạy lại workflow |
+| Trang báo "Chưa cấu hình backend" | `API_BASE` trong `config.js` vẫn là `TEN-PROJECT`. Sửa thành địa chỉ Vercel, commit và push (bước C) |
 | Thanh đỏ "Không kết nối được máy chủ… CORS" | `FRONTEND_ORIGINS` sai. Phải là `https://TEN_GITHUB.github.io` (không có đường dẫn repo), sửa xong **Redeploy** |
 | Vercel trả 404 ở mọi đường dẫn | Chưa đặt **Root Directory = `backend`** (*Settings → General*), đặt lại rồi Redeploy |
 | `/api/health` có `problems` | Thiếu hoặc quá ngắn: `JWT_SECRET`, `ENCRYPTION_KEY` cần ≥ 32 ký tự; kiểm tra `GITHUB_TOKEN`, `GITHUB_OWNER`, `FRONTEND_ORIGINS` |
@@ -293,7 +307,8 @@ Backend trên máy vẫn dùng **GitHub thật** (cần token và repo), nên v�
 | `setup-github.js` bỏ qua webhook | `.env` thiếu `PUBLIC_API_URL` hoặc `GITHUB_WEBHOOK_SECRET` |
 | Webhook báo 401 | `GITHUB_WEBHOOK_SECRET` trên Vercel khác secret đã gắn vào webhook: sửa cho trùng, Redeploy, chạy lại `setup-github.js` (nó cập nhật secret) |
 | Webhook báo 503 | Chưa đặt `GITHUB_WEBHOOK_SECRET` trên Vercel hoặc chưa Redeploy |
-| Pages 404 | Chưa chọn *Source: GitHub Actions*, hoặc workflow chưa chạy xong |
+| Pages 404 | Chưa chọn *Deploy from a branch → main → / (root)*, hoặc `index.html` không nằm ở gốc repo (kiểm tra trên GitHub: `index.html` phải thấy ngay ở trang chính của repo) |
+| Push bị GitHub chặn ("Push cannot contain secrets") | Bạn đang đứng trong `backend` hoặc đã `git add` file `backend/.env`. Xoá thư mục `.git` đã tạo nhầm, vào thư mục gốc rồi `git init` lại (xem bước 0.1) |
 | Không chọn được Pages cho repo | Repo đang Private trên gói miễn phí: chuyển Public (repo mã nguồn không chứa bí mật) |
 | Tải ảnh báo quá lớn | Giới hạn 4MB/ảnh (payload Vercel); ảnh lớn được nén tự động ở trình duyệt |
 | Ảnh hoặc Gemini key cũ không đọc được | `ENCRYPTION_KEY` đã bị đổi so với lúc lưu. Đặt lại đúng giá trị cũ |

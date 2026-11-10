@@ -5,7 +5,7 @@
 Mỗi tài khoản **tự tạo và tự lưu** bài **tự luận** + **trắc nghiệm** của mình để tự ôn; không ai xem được bài của ai.
 
 ```
-GitHub Pages (frontend tĩnh, thư mục frontend/)  ──HTTPS + Bearer token──▶  Vercel (backend, thư mục backend/)
+GitHub Pages (giao diện tĩnh ở thư mục gốc)       ──HTTPS + Bearer token──▶  Vercel (backend, thư mục backend/)
                                                                               │
                               ┌───────────────────────────────────────────────┼───────────────────────────────┐
                               ▼                                               ▼                               ▼
@@ -33,11 +33,10 @@ Không dùng MongoDB, Cloudinary hay Express. Backend chỉ phụ thuộc đúng
 4. Cron `/api/cron/prune` chạy mỗi ngày 03:30 (VN). Vercel tự gửi `Authorization: Bearer $CRON_SECRET`.
 
 ## 3. Frontend lên GitHub Pages
-1. *Settings → Pages → Source: **GitHub Actions***.
-2. *Settings → Secrets and variables → Actions → Variables*: thêm **`API_BASE_URL`** = `https://<project>.vercel.app`
-   (hoặc sửa tay `frontend/config.js`).
-3. Push lên `main` → workflow `.github/workflows/pages.yml` đăng `frontend/` (không cần build).
-4. Mở `https://TEN_GITHUB.github.io/TEN_REPO/` → Đăng ký.
+Giao diện (`index.html`, `404.html`, `config.js`, `css/`, `js/`, `img/`) nằm ngay ở thư mục gốc, không cần build.
+1. Sửa `config.js`: `API_BASE` = `https://<project>.vercel.app`, commit và push.
+2. *Settings → Pages → Source: **Deploy from a branch** → `main` → `/ (root)`*.
+3. Mở `https://TEN_GITHUB.github.io/TEN_REPO/` → Đăng ký.
 
 ## Vì sao Pages ↔ Vercel chạy ổn định
 | Rủi ro | Cách xử lý |

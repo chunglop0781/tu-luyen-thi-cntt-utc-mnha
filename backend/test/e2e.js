@@ -6,10 +6,10 @@ const { chromium } = require('playwright');
 const { FakeGitHub } = require('./fakeGithub');
 const { createApp } = require('../src/app');
 
-const FRONT = path.join(__dirname, '..', '..', 'frontend');
+const FRONT = path.join(__dirname, '..', '..');
 const env = { GITHUB_TOKEN: 't', GITHUB_OWNER: 'me', JWT_SECRET: 'j'.repeat(40), ENCRYPTION_KEY: 'k'.repeat(40), GITHUB_WEBHOOK_SECRET: 's', CRON_SECRET: 'c',
   FRONTEND_ORIGINS: 'http://127.0.0.1:4102', BCRYPT_ROUNDS: '8', ACCESS_TOKEN_MINUTES: '0.05' /* 3 giây: ép chạy đường refresh */ };
-const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
 const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓', m); };
 
 (async () => {
@@ -19,7 +19,7 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
   const web = http.createServer((req, res) => {
     let p = req.url.split('?')[0]; if (p === '/') p = '/index.html';
     if (p === '/config.js') { res.setHeader('Content-Type', 'text/javascript'); return res.end("window.APP_CONFIG={API_BASE:'http://127.0.0.1:4101'};"); }
-    const f = path.join(FRONT, p); if (!f.startsWith(FRONT) || !fs.existsSync(f)) { res.statusCode = 404; return res.end('nf'); }
+    const f = path.join(FRONT, p); if (!f.startsWith(FRONT) || /\/(backend|\.env)/.test(p) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.statusCode = 404; return res.end('nf'); }
     res.setHeader('Content-Type', mime[path.extname(f)] || 'application/octet-stream'); res.end(fs.readFileSync(f));
   }).listen(4102);
 
@@ -34,10 +34,10 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     ok(page.url().endsWith('#/'), 'đăng ký xong vào trang chủ (hash router)');
 
     console.log('Tạo trắc nghiệm bằng nhập văn bản');
-    await page.click('text=＋ Trắc nghiệm'); await page.waitForSelector('text=Tạo bài trắc nghiệm');
+    await page.click('a:has-text("Tạo trắc nghiệm")'); await page.waitForSelector('text=Tạo bài trắc nghiệm');
     await page.fill('input[placeholder^="VD: Ôn tập"]', 'Mạng cơ bản'); await page.fill('input[list=subj]', 'Mạng máy tính');
     await page.click('summary'); await page.fill('textarea[placeholder^="Câu 1: Nội dung"]', 'Câu 1: Cổng HTTP?\nA. 21\nB. 80\nĐáp án: B\nGiải thích: web\nCâu 2: Chọn giao thức tầng giao vận\n*A. TCP\nB. IP\n*C. UDP');
-    await page.click('text=📥 Đọc đề & thêm vào'); await page.waitForSelector('text=Đã thêm 2 câu');
+    await page.click('text=Đọc đề và thêm vào'); await page.waitForSelector('text=Đã thêm 2 câu');
     await page.click('button:has-text("Lưu bài")'); await page.waitForSelector('.card.item h3:has-text("Mạng cơ bản")'); ok(true, 'lưu trắc nghiệm → hiện trong danh sách');
 
     console.log('Làm bài trắc nghiệm (token hết hạn giữa chừng → tự refresh)');
@@ -46,12 +46,12 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     await page.click('label.choice:has-text("80")'); page.once('dialog', (d) => d.accept());
     await page.click('.sticky button:has-text("Nộp bài")'); await page.waitForSelector('.bigscore', { timeout: 15000 });
     ok((await page.textContent('.bigscore')).trim() === '1/2', 'chấm đúng 1/2 điểm');
-    ok(await page.isVisible('text=💡'), 'hiện giải thích');
+    ok(await page.isVisible('text=Giải thích:'), 'hiện giải thích');
 
     console.log('Tạo + làm tự luận, tự chấm');
     await page.goto(B + '#/essay/new'); await page.waitForSelector('text=Tạo bài tự luận');
     await page.fill('input[placeholder^="VD: So sánh"]', 'TCP vs UDP'); await page.fill('textarea[placeholder="Đề bài…"]', 'So sánh TCP và UDP');
-    await page.click('text=＋ Thêm tiêu chí'); await page.fill('input[placeholder="Tiêu chí"]', 'TCP'); await page.fill('input[placeholder^="Từ khoá"]', 'tin cậy, hướng kết nối');
+    await page.click('text=Thêm tiêu chí'); await page.fill('input[placeholder="Tiêu chí"]', 'TCP'); await page.fill('input[placeholder^="Từ khoá"]', 'tin cậy, hướng kết nối');
     await page.click('button:has-text("Lưu bài")'); await page.waitForSelector('.card.item h3:has-text("TCP vs UDP")');
     await page.click('.card.item:has-text("TCP vs UDP") >> text=Làm bài'); await page.waitForSelector('text=Bài làm');
     await page.fill('textarea[placeholder^="Viết bài"]', 'TCP tin cậy và hướng kết nối');
@@ -72,8 +72,8 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     ok([...gh.repos.get('tu-luyen-thi-cntt-utc-mnha-image').files.keys()].some((k) => k.endsWith('.enc')), 'ảnh nằm mã hoá (.enc) trong repo ảnh');
 
     console.log('Cài đặt & chẩn đoán kết nối, đăng xuất');
-    await page.goto(B + '#/settings'); await page.waitForSelector('text=Kiểm tra kết nối'); await page.click('text=🩺 Kiểm tra kết nối'); await page.waitForSelector('.diag:has-text("\\"ok\\": true")'); ok(true, 'health deep OK từ GitHub Pages origin');
-    await page.click('text=Đăng xuất >> nth=0'); await page.waitForSelector('.auth'); ok(page.url().endsWith('#/login'), 'đăng xuất → trang đăng nhập');
+    await page.goto(B + '#/settings'); await page.waitForSelector('text=Kiểm tra kết nối'); await page.click('button:has-text("Kiểm tra kết nối")'); await page.waitForSelector('.diag:has-text("\\"ok\\": true")'); ok(true, 'health deep OK từ GitHub Pages origin');
+    await page.click('.um-btn'); await page.click('.drop >> text=Đăng xuất'); await page.waitForSelector('.auth'); ok(page.url().endsWith('#/login'), 'đăng xuất → trang đăng nhập');
     await page.goto(B + '#/'); await page.waitForSelector('.auth'); ok(true, 'chưa đăng nhập vào trang riêng → bị chuyển sang đăng nhập');
 
     console.log('Đăng nhập lại');
