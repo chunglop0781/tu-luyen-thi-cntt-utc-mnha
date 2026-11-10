@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "functions": {
+    "api/index.js": { "memory": 1024, "maxDuration": 60 }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
+  "crons": [{ "path": "/api/cron/prune", "schedule": "30 20 * * *" }]
+}

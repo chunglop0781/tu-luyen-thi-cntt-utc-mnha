@@ -1,0 +1,35 @@
+name: Deploy frontend to GitHub Pages
+on:
+  push:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ghi API_BASE vào config.js (nếu đặt biến repo API_BASE_URL)
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [ -n "$API_BASE_URL" ]; then
+            printf "window.APP_CONFIG = { API_BASE: '%s' };\n" "$API_BASE_URL" > frontend/config.js
+          fi
+          cat frontend/config.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend
+      - id: deployment
+        uses: actions/deploy-pages@v4
