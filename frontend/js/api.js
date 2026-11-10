@@ -101,10 +101,6 @@ export async function authCall(kind, body) {
   const j = await fetchJson('POST', `/api/auth/${kind}`, body, {}, 40000, { retry: false });
   session.set(j); return j;
 }
-/** Gọi API auth không trả token (gửi OTP, đặt lại mật khẩu). POST không retry để không gửi mail trùng. */
-export async function authPost(kind, body) {
-  return fetchJson('POST', `/api/auth/${kind}`, body, {}, 40000, { retry: false });
-}
 export async function logout() {
   const s = session.get();
   if (s && s.refreshToken) { try { await fetchJson('POST', '/api/auth/logout', { refreshToken: s.refreshToken }, {}, 8000, { retry: false }); } catch { /* vẫn đăng xuất cục bộ */ } }

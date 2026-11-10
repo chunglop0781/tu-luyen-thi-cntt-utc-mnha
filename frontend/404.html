@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#1d4ed8">
-  <title>Tự luyện thi CNTT UTC</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
-  <link rel="stylesheet" href="css/style.css">
+  <title>Đang chuyển hướng…</title>
+  <script>
+    // GitHub Pages không có rewrite: gõ thẳng /ten-repo/essay/abc sẽ vào đây → đổi sang /ten-repo/#/essay/abc
+    (function () {
+      var parts = location.pathname.split('/').filter(Boolean);
+      var isProject = /\.github\.io$/i.test(location.hostname);
+      var base = isProject && parts.length ? '/' + parts[0] + '/' : '/';
+      var rest = parts.slice(isProject ? 1 : 0).join('/');
+      location.replace(base + '#/' + rest + location.search);
+    })();
+  </script>
 </head>
-<body>
-  <div id="conn" class="conn" hidden></div>
-  <header class="top" id="top"></header>
-  <main id="app" class="wrap"><p class="muted">Đang tải…</p></main>
-  <div id="toasts" class="toasts"></div>
-  <script src="config.js"></script>
-  <script type="module" src="js/app.js"></script>
-</body>
+<body><p>Đang chuyển hướng… <a href="./">Về trang chủ</a></p></body>
 </html>

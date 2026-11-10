@@ -1,4 +1,4 @@
-// ⚙️ Cấu hình kết nối tới backend Vercel. Sửa 1 dòng này (hoặc để workflow GitHub Pages tự ghi từ biến API_BASE_URL).
+// Cấu hình kết nối tới backend Vercel: chỉ cần sửa dòng API_BASE bên dưới (địa chỉ Vercel, không có / ở cuối).
 window.APP_CONFIG = {
-  API_BASE: 'https://TEN-PROJECT.vercel.app',
+  API_BASE: "https://tu-luyen-thi-cntt-utc-mnha-smoky.vercel.app/",
 };
