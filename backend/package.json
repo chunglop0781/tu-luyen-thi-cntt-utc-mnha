@@ -4,13 +4,16 @@
   "description": "Backend (Vercel) cho Tự luyện thi của mnha — mỗi tài khoản tự tạo & lưu bài của mình trên GitHub",
   "private": true,
   "main": "api/index.js",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node scripts/dev-server.js",
     "test": "NODE_PATH=test/stubs/node_modules node test/run.js",
     "test:ui": "NODE_PATH=test/stubs/node_modules node test/e2e-ui.js",
     "setup": "node scripts/setup-github.js",
-    "prune": "node scripts/prune.js"
+    "prune": "node scripts/prune.js",
+    "test:share": "NODE_PATH=test/stubs/node_modules:$PLAYWRIGHT_PATH node test/e2e-share.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

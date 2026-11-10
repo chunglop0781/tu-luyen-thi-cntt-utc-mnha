@@ -121,7 +121,8 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   router.patch('/api/submissions/:id', async (ctx) => ({ ok: true, submission: await content.selfGrade(authed(ctx).sub, ctx.params.id, ctx.body) }));
   router.post('/api/submissions/:id/ai-grade', async (ctx) => {
     const a = authed(ctx); if (!allow('ai:' + a.sub, 15, 3600e3)) throw new HttpError(429, 'Chấm AI quá nhiều lần trong 1 giờ', 'RATE');
-    return { ok: true, submission: await content.aiGrade(a.sub, ctx.params.id, { provider: ctx.body.provider, model: ctx.body.model }) };
+    const u = await auth.me(a);
+    return { ok: true, submission: await content.aiGrade(a.sub, ctx.params.id, { provider: ctx.body.provider, model: ctx.body.model, studentName: u.displayName || u.username }) };
   });
   router.post('/api/submissions/:id/ai-analyze', async (ctx) => {
     const a = authed(ctx); if (!allow('ai:' + a.sub, 15, 3600e3)) throw new HttpError(429, 'Dùng AI quá nhiều lần trong 1 giờ', 'RATE');
@@ -129,6 +130,21 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
     return { ok: true, submission: await content.aiAnalyze(a.sub, ctx.params.id, { provider: ctx.body.provider, model: ctx.body.model, studentName: u.displayName }) };
   });
   router.delete('/api/submissions/:id', async (ctx) => { await content.deleteSubmission(authed(ctx).sub, ctx.params.id); return { ok: true }; });
+
+
+  // ── Chia sẻ bài trắc nghiệm / tự luận (người làm phải đăng nhập; chủ bài thấy tên, người làm chỉ thấy bài + điểm của mình) ──
+  router.post('/api/shares', async (ctx) => ({ ok: true, ...(await content.createShare(authed(ctx).sub, ctx.body.type || 'quiz', ctx.body.itemId)) }));
+  router.patch('/api/shares/:sid', async (ctx) => ({ ok: true, ...(await content.setShareEnabled(authed(ctx).sub, ctx.params.sid, ctx.body.enabled !== false)) }));
+  router.get('/api/shares/:sid', async (ctx) => ({ ok: true, ...(await content.getShared(authed(ctx).sub, ctx.params.sid)) }));
+  router.get('/api/shares/:sid/history', async (ctx) => ({ ok: true, ...(await content.sharedHistory(authed(ctx).sub, ctx.params.sid)) }));
+  router.put('/api/shares/:sid/submissions/:id', async (ctx) => {
+    const a = authed(ctx); const u = await auth.me(a);
+    return { ok: true, submission: await content.submitShared(a.sub, u.displayName || u.username, ctx.params.sid, ctx.params.id, ctx.body) };
+  });
+  router.get('/api/shares/:sid/images/:id', async (ctx) => {
+    const r = await content.sharedImage(authed(ctx).sub, ctx.params.sid, ctx.params.id);
+    return { binary: r.data, mime: r.mime };
+  });
 
   // ── Ảnh (body nhị phân, không JSON) ──
   router.post('/api/images', async (ctx) => {

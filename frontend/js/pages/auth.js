@@ -1,4 +1,4 @@
-import { authCall, authPost } from '../api.js';
+import { authCall, authPost, nextPage } from '../api.js';
 import { h, toast, logo, withToggle } from '../ui.js';
 
 /**
@@ -66,7 +66,7 @@ export function loginPage(ctx) {
       label(reg ? 'Tên đăng nhập' : 'Tên đăng nhập hoặc email', u, reg ? '(a-z, 0-9, _ . -)' : null), reg ? label('Email', em, '(nhận mã xác minh)') : null,
       label('Mật khẩu', withToggle(p)), reg ? label('Tên hiển thị', n, '(tuỳ chọn)') : null, reg ? label('Mã mời', inv, '(nếu có)') : null, btn);
     submit(form, btn, async () => {
-      if (!reg) { await authCall('login', { identifier: u.value.trim(), password: p.value }); toast('Đăng nhập thành công', 'ok'); return ctx.go('/'); }
+      if (!reg) { await authCall('login', { identifier: u.value.trim(), password: p.value }); toast('Đăng nhập thành công', 'ok'); return ctx.go(nextPage.take() || '/'); }
       const body = { username: u.value, email: em.value, password: p.value, displayName: n.value, invite: inv.value || undefined };
       const r = await authPost('register/start', body);
       pending = { body, email: r.email, resendIn: r.resendIn || 60 };
@@ -86,7 +86,7 @@ export function loginPage(ctx) {
     const form = h('form', { class: 'stack' }, label('Mã xác minh', f.code), btn, f.row);
     submit(form, btn, async () => {
       await authCall('register/verify', { email: pending.body.email, code: f.code.value });
-      clearInterval(timer); pending = null; toast('Đã tạo tài khoản', 'ok'); ctx.go('/');
+      clearInterval(timer); pending = null; toast('Đã tạo tài khoản', 'ok'); ctx.go(nextPage.take() || '/');
     });
     box.replaceChildren(
       ...head('Nhập mã xác minh', `Mã 6 số đã gửi tới ${pending.email}. Có hiệu lực 10 phút (chưa thấy thì xem mục Spam).`),

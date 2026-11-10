@@ -1,4 +1,4 @@
-import { get, put, post, uploadImage, newId, imageUrl } from '../api.js';
+import { get, put, post, uploadImage, newId, imageUrl, imageCtx } from '../api.js';
 import { h, toast, spinner } from '../ui.js';
 import { mountQuizEditor } from '../../legacy/quizEditor.js';
 import { mountQuizTake } from '../../legacy/quizTake.js';
@@ -183,7 +183,7 @@ function takeHtml(item, view, cfg) {
   const who = esc(cfg.studentName);
   if (!PART_KEYS.length) return '<div class="exam-page"><div class="lock-msg show">Bài trắc nghiệm này chưa có câu hỏi nào.</div></div>';
   return `
-  <div class="quiz-pre"><a href="#/" class="quiz-back">← Quay lại bài của tôi</a></div>
+  <div class="quiz-pre"><a href="${cfg.backHref || '#/'}" class="quiz-back">${cfg.backText || '← Quay lại bài của tôi'}</a></div>
   <div class="exam-page qx-pending">
     <div class="qx-start" id="qxStart"><div class="qx-start-card"><span class="qx-kicker">BÀI TRẮC NGHIỆM</span><h2>${esc(item.title)}</h2>${subjectName ? `<p class="qx-sub">${esc(subjectName)}</p>` : ''}
       <div class="qx-facts"><div><strong>${total}</strong><span>câu hỏi</span></div><div>${untimed ? '<strong>∞</strong><span>không giới hạn</span>' : `<strong>${duration}</strong><span>phút</span>`}</div><div><strong>${esc(maxScore)}</strong><span>thang điểm</span></div></div>
@@ -231,8 +231,11 @@ function takeHtml(item, view, cfg) {
   </style>`;
 }
 
-export async function quizPracticePage(ctx, id) {
-  const [{ item }, sess] = await Promise.all([get(`/api/quizzes/${id}`), Promise.resolve(JSON.parse(localStorage.getItem('utc.auth.v2') || '{}'))]);
+/** opts.shareId + opts.item: làm bài được chia sẻ (id = shareId) — nộp qua /api/shares/:id/submissions, đề đã bị bỏ đáp án. */
+export async function quizPracticePage(ctx, id, opts = {}) {
+  const shared = opts.shareId || null;
+  if (shared) imageCtx.share = shared;
+  const [{ item }, sess] = await Promise.all([opts.item ? { item: opts.item } : get(`/api/quizzes/${id}`), Promise.resolve(JSON.parse(localStorage.getItem('utc.auth.v2') || '{}'))]);
   const key = `utc.quizorder.${id}.${item.updatedAt}`;
   const view = toStudentView(item);
   let order = null; try { order = JSON.parse(localStorage.getItem(key)); } catch { order = null; }
@@ -240,7 +243,7 @@ export async function quizPracticePage(ctx, id) {
   if (!draftRaw) order = null;                                   // lượt mới → xáo lại
   if (item.shuffle) { order = shuffleParts(view, order); try { localStorage.setItem(key, JSON.stringify(order)); } catch { /* bỏ qua */ } }
   const user = (sess.user || {});
-  const root = h('div'); root.innerHTML = takeHtml(item, view, { studentName: (user.displayName || user.username || 'THÍ SINH').toUpperCase(), resume: !!(draftRaw && draftRaw.endAt && Date.now() < draftRaw.endAt + 30 * 60 * 1000) });
+  const root = h('div'); root.innerHTML = takeHtml(item, view, { studentName: (user.displayName || user.username || 'THÍ SINH').toUpperCase(), resume: !!(draftRaw && draftRaw.endAt && Date.now() < draftRaw.endAt + 30 * 60 * 1000), ...(shared ? { backHref: `#/s/${shared}`, backText: '← Về trang bài chia sẻ (lịch sử & biểu đồ điểm)' } : {}) });
   const stopImg = watchEncryptedImages(root);
   const CFG = { lessonId: id, title: item.title, duration: item.duration === null ? null : (item.duration || 20), maxScore: item.maxScore, readOnly: false, parts: view.parts, audioUrl: view.audioUrl || '', alarmSrc: 'musics/iphone-17-pro-max.mp3' };
   let dispose = null, started = false;
@@ -248,14 +251,15 @@ export async function quizPracticePage(ctx, id) {
   const startedAt = new Date().toISOString();
   const bridge = {
     submit: async (answers) => {
-      const r = await put(`/api/submissions/${subId}`, { itemType: 'quiz', itemId: id, answers, startedAt, durationSec: (Date.now() - new Date(startedAt)) / 1000 }, { retry: true });
+      const body = { answers, startedAt, durationSec: (Date.now() - new Date(startedAt)) / 1000 };
+      const r = shared ? await put(`/api/shares/${shared}/submissions/${subId}`, body, { retry: true }) : await put(`/api/submissions/${subId}`, { itemType: 'quiz', itemId: id, ...body }, { retry: true });
       const sub = r.submission; const expl = {};
       for (const k of ['mcq', 'tf', 'fill']) for (const q of ((sub.snapshot.parts[k] || {}).questions || [])) { expl[q.id] = q.explanationHtml || null; (q.statements || []).forEach((st) => { expl[st.id] = st.explanationHtml || null; }); }
       const result = { ...sub.result, items: sub.result.items.map((it) => ({ ...it, explanationHtml: expl[it.id] || null })) };
       try { localStorage.removeItem(key); localStorage.removeItem('utc.quizsub.' + id); } catch { /* bỏ qua */ }
       return { success: true, submissionId: sub.id, status: 'committed', syncStatus: 'committed', result };
     },
-    retry: () => { if (!ctx.isCurrent()) return; try { localStorage.removeItem(key); localStorage.removeItem('quiz-draft:' + id); localStorage.removeItem('utc.quizsub.' + id); } catch { /* bỏ qua */ } ctx.go('/'); setTimeout(() => ctx.go(`/quiz/${id}`), 30); },
+    retry: () => { if (!ctx.isCurrent()) return; try { localStorage.removeItem(key); localStorage.removeItem('quiz-draft:' + id); localStorage.removeItem('utc.quizsub.' + id); } catch { /* bỏ qua */ } ctx.go('/'); setTimeout(() => ctx.go(shared ? `/s/${shared}/play` : `/quiz/${id}`), 30); },
   };
   whenConnected(root, () => {
     const btn = root.querySelector('#qxStartBtn'), page = root.querySelector('.exam-page'); if (!btn) return;

@@ -1,4 +1,4 @@
-import { API, session, on, ping, logout } from './api.js';
+import { API, session, on, ping, logout, imageCtx, nextPage } from './api.js';
 import { h, toast, spinner, errorBox, logo } from './ui.js';
 import { loginPage } from './pages/auth.js';
 import { homePage, historyPage } from './pages/home.js';
@@ -7,6 +7,7 @@ import { essayPractice } from './pages/practice.js';
 import { quizEditorPage, quizPracticePage } from './pages/quiz.js';
 import { submissionPage } from './pages/submission.js';
 import { settingsPage, aiSettingsPage } from './pages/settings.js';
+import { sharePage, sharePlayPage, shareHistoryPage } from './pages/share.js';
 
 // Định tuyến bằng #hash → đổi trang / tải lại luôn chạy được trên GitHub Pages (không cần server rewrite).
 const routes = [
@@ -22,6 +23,9 @@ const routes = [
   [/^\/quiz\/([a-f0-9]+)\/edit$/, (c, m) => quizEditorPage(c, m[1])],
   [/^\/quiz\/([a-f0-9]+)$/, (c, m) => quizPracticePage(c, m[1])],
   [/^\/submission\/([a-f0-9]+)$/, (c, m) => submissionPage(c, m[1])],
+  [/^\/s\/([a-f0-9]+)$/, (c, m) => sharePage(c, m[1])],
+  [/^\/s\/([a-f0-9]+)\/play$/, (c, m) => sharePlayPage(c, m[1])],
+  [/^\/s\/([a-f0-9]+)\/history$/, (c, m) => shareHistoryPage(c, m[1])],
 ];
 
 const app = document.getElementById('app'), top = document.getElementById('top'), conn = document.getElementById('conn');
@@ -53,8 +57,9 @@ async function render() {
   const s = session.get();
   renderTop();
   if (!route) { app.replaceChildren(h('div', { class: 'card' }, h('h2', null, 'Không tìm thấy trang'), h('a', { class: 'btn', href: '#/' }, 'Về trang chủ'))); return; }
-  if (!route[2] || !route[2].guest) { if (!s) return go('/login'); }
-  else if (s) return go('/');
+  imageCtx.share = null;                           // mỗi trang tự đặt lại nếu đang xem bài chia sẻ
+  if (!route[2] || !route[2].guest) { if (!s) { if (/^\/s\//.test(path)) nextPage.save(path); return go('/login'); } }   // link chia sẻ: bắt đăng nhập rồi quay lại đúng bài
+  else if (s) return go(nextPage.take() || '/');
   app.replaceChildren(spinner());
   const ctx = { query: new URLSearchParams(qs || ''), setCleanup: (f) => { cleanup = f; }, go, isCurrent: () => token === navToken };
   try {
@@ -63,7 +68,7 @@ async function render() {
     app.replaceChildren(node); window.scrollTo(0, 0);
   } catch (e) {
     if (token !== navToken) return;
-    if (e.status === 401) { session.clear(); return go('/login'); }
+    if (e.status === 401) { session.clear(); if (/^\/s\//.test(path)) nextPage.save(path); return go('/login'); }
     app.replaceChildren(errorBox(e, render));
   }
 }

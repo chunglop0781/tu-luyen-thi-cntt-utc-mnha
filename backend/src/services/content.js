@@ -1,7 +1,7 @@
 'use strict';
 /** Bài tự luận / trắc nghiệm / bài nộp của TỪNG tài khoản — repo DATA (private, không dọn commit). */
 const { HttpError } = require('../http');
-const { nowIso, isId, mapLimit } = require('../util');
+const { nowIso, isId, mapLimit, randomId } = require('../util');
 const { sanitizeEssay, sanitizeQuiz, rawTexts, imageRefs } = require('./validate');
 const { suggestEssay } = require('./grading');
 const { grade: gradeParts } = require('./quiz/grade');
@@ -14,6 +14,7 @@ const { encryptText, decryptText, deriveKey } = require('../crypto');
 
 const TYPES = { essay: 'essays', quiz: 'quizzes' };
 const MAX_SUBS_IN_INDEX = 1000;
+const MAX_SHARE_RESULTS = 4000;   // số kết quả tối đa lưu trong 1 bài chia sẻ
 const MAX_ANALYSES = 5;            // số lần phân tích AI tối đa cho mỗi bài nộp trắc nghiệm
 const ANALYSIS_COOLDOWN_MS = 30000; // giãn cách giữa 2 lần phân tích của cùng một bài nộp
 
@@ -34,6 +35,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     createdAt: it.createdAt, updatedAt: it.updatedAt,
     size: it.type === 'quiz' ? qcfg.PARTS.reduce((n, k) => n + ((it.parts && it.parts[k] && it.parts[k].questions.length) || 0), 0) : it.maxScore,
     attempts: prev.attempts || 0, bestPct: prev.bestPct == null ? null : prev.bestPct, lastAt: prev.lastAt || null,
+    ...(prev.shareId ? { shareId: prev.shareId } : {}),
   });
 
   async function getIndex(uid) {
@@ -47,7 +49,15 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     const subjects = [...new Set(items.map((i) => i.subject).filter(Boolean))].sort();
     const quizSubs = idx.subs.filter((s) => s.type === 'quiz');
     const avg = quizSubs.length ? Math.round(quizSubs.reduce((s, x) => s + x.pct, 0) / quizSubs.length) : null;
-    return { items, subjects, recent: idx.subs.slice(0, 8), stats: { essays: items.filter((i) => i.type === 'essay').length, quizzes: items.filter((i) => i.type === 'quiz').length, submissions: idx.subs.length, avgQuizPct: avg } };
+    const joined = new Map();   // bài người khác chia sẻ mà tôi đã làm (gom theo shareId)
+    for (const x of idx.subs) {
+      if (!x.shareId || idx.items[x.itemId]) continue;
+      const j = joined.get(x.shareId) || { shareId: x.shareId, type: x.type, title: x.title, subject: x.subject, attempts: 0, bestPct: null, lastAt: x.at };
+      j.attempts++; if (x.pct != null && (j.bestPct == null || x.pct > j.bestPct)) j.bestPct = x.pct;
+      if (String(x.at) > String(j.lastAt)) j.lastAt = x.at;
+      joined.set(x.shareId, j);
+    }
+    return { items, subjects, shared: [...joined.values()].sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt))), recent: idx.subs.slice(0, 8), stats: { essays: items.filter((i) => i.type === 'essay').length, quizzes: items.filter((i) => i.type === 'quiz').length, submissions: idx.subs.length, avgQuizPct: avg } };
   }
 
   async function getItem(uid, type, id) {
@@ -131,7 +141,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return out;
   }
 
-  const subSummary = (sub, pct) => ({ id: sub.id, type: sub.type, itemId: sub.itemId, title: sub.title, subject: sub.subject, at: sub.submittedAt, score: sub.score, max: sub.max, pct: pct == null ? null : pct });
+  const subSummary = (sub, pct) => ({ id: sub.id, type: sub.type, itemId: sub.itemId, title: sub.title, subject: sub.subject, at: sub.submittedAt, score: sub.score, max: sub.max, pct: pct == null ? null : pct, ...(sub.shareId ? { shareId: sub.shareId } : {}) });
 
   async function getSubmission(uid, id) {
     mustId(id);
@@ -160,6 +170,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   async function selfGrade(uid, id, { selfScore, note }) {
     const sub = await getSubmission(uid, id);
     if (sub.type !== 'essay') throw new HttpError(400, 'Chỉ bài tự luận mới tự chấm', 'BAD_TYPE');
+    if (sub.shareId && selfScore !== null && selfScore !== undefined) throw new HttpError(403, 'Bài làm từ link chia sẻ không tự chấm điểm được — hãy dùng chấm AI', 'SHARED_LOCKED');
     const n = Number(selfScore);
     if (selfScore !== null && selfScore !== undefined && (Number.isNaN(n) || n < 0 || n > sub.max)) throw new HttpError(400, `Điểm phải trong 0–${sub.max}`, 'VALIDATION');
     const next = await store.update('data', subPath(uid, id), (s) => {
@@ -193,15 +204,20 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { provider: provider.id, label: provider.label, model: r.model, response: r.text.trim().slice(0, 60), ms: Date.now() - t0, ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}) };
   }
 
+  /** Chấm AI bài tự luận bằng nhà cung cấp + key của CHÍNH người nộp. Bài từ link chia sẻ chỉ được chấm một lần (không "chấm lại cho tới khi cao điểm") và điểm được đẩy lên biểu đồ chung. */
   async function aiGrade(uid, id, wanted = {}) {
     const sub = await getSubmission(uid, id);
     if (sub.type !== 'essay') throw new HttpError(400, 'Chỉ bài tự luận mới chấm AI', 'BAD_TYPE');
+    const shared = sub.shareId && isId(sub.shareId) ? sub.shareId : null;
+    const already = () => new HttpError(409, 'Bài làm từ link chia sẻ chỉ được chấm AI một lần', 'ALREADY_GRADED');
+    if (shared && sub.ai) throw already();
     const { provider, apiKey, model } = await resolveAi(uid, wanted);
     const essay = { prompt: sub.snapshot.prompt, modelAnswer: sub.snapshot.modelAnswer, rubric: sub.snapshot.rubric, maxScore: sub.snapshot.maxScore };
     const ai = await gradeEssay({ provider, apiKey, model, essay, answer: sub.text, fetchImpl, lookup });
     ai.at = nowIso();
-    const next = await store.update('data', subPath(uid, id), (s) => { s.ai = ai; if (s.selfScore == null) s.score = ai.score; return s; }, { message: `ai-grade ${id}` });
+    const next = await store.update('data', subPath(uid, id), (s) => { if (shared && s.ai) throw already(); s.ai = ai; if (s.selfScore == null) s.score = ai.score; return s; }, { message: `ai-grade ${id}` });
     if (next.score != null) await patchIndexSub(uid, id, next.score, next.max);
+    if (shared && next.score != null) await setResultScore(shared, { id, uid, n: String(wanted.studentName || '').slice(0, 60), at: next.submittedAt, score: next.score, max: next.max });
     return next;
   }
 
@@ -225,9 +241,176 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   }
 
   async function deleteSubmission(uid, id) {
-    await getSubmission(uid, id);
+    const sub = await getSubmission(uid, id);
+    // Bài nộp qua link chia sẻ đã nằm trong biểu đồ chung → không cho xoá (như luyen-thi), để điểm không biến mất.
+    if (sub.shareId) throw new HttpError(403, 'Bài nộp từ link chia sẻ không xoá được — điểm đã nằm trong biểu đồ chung', 'SHARED_LOCKED');
     await store.remove('data', subPath(uid, id), `delete sub ${id}`);
     await store.update('data', indexPath(uid), (idx) => { idx.subs = idx.subs.filter((s) => s.id !== id); return idx; }, { message: `index ${uid}`, defaultValue: emptyIndex() });
+  }
+
+
+  // ───────── Chia sẻ bài (trắc nghiệm + tự luận) ─────────
+  // shares/<shareId>.json (repo DATA): { id, ownerId, itemId, type, title, subject, enabled, createdAt, results: [{ id, uid, n, at, score, max }] }
+  // Người làm: bài nộp lưu trong kho riêng của họ (u/<uid>/submissions) + 1 dòng kết quả trong file chia sẻ để dựng biểu đồ.
+  const sharePath = (sid) => `shares/${sid}.json`;
+  const shareRefPath = (uid, itemId) => `${base(uid)}/shares/${itemId}.json`;   // { shareId } — chủ bài tra ngược item → link
+  const round2 = (n) => Math.round(n * 100) / 100;
+
+  async function loadShare(sid, uid, { ownerOnly = false, needEnabled = true } = {}) {
+    mustId(sid);
+    const r = await store.read('data', sharePath(sid));
+    if (!r) throw new HttpError(404, 'Link chia sẻ không tồn tại', 'NOT_FOUND');
+    const doc = r.data, isOwner = doc.ownerId === uid;
+    if (ownerOnly && !isOwner) throw new HttpError(404, 'Link chia sẻ không tồn tại', 'NOT_FOUND');
+    if (needEnabled && !isOwner && doc.enabled === false) throw new HttpError(404, 'Chủ bài đã tắt chia sẻ', 'SHARE_OFF');
+    return { doc, isOwner };
+  }
+
+  const shareType = (doc) => (doc.type === 'essay' ? 'essay' : 'quiz');
+  async function sharedItem(doc) {
+    const r = await store.read('data', itemPath(doc.ownerId, shareType(doc), doc.itemId));
+    if (!r) throw new HttpError(404, 'Bài này đã bị chủ bài xoá', 'NOT_FOUND');
+    return r.data;
+  }
+
+  /** Bỏ đáp án + giải thích trước khi gửi cho người làm (đáp án chỉ trả sau khi nộp). */
+  function studentItem(item) {
+    if (item.type === 'essay') {     // tự luận: chỉ đề bài — đáp án mẫu + tiêu chí chỉ trả về trong bài nộp của chính người làm
+      return { id: item.id, type: 'essay', title: item.title, subject: item.subject, prompt: item.prompt, maxScore: item.maxScore, duration: item.duration === undefined ? null : item.duration, updatedAt: item.updatedAt };
+    }
+    const out = { id: item.id, type: 'quiz', title: item.title, subject: item.subject, contentHtml: item.contentHtml || '', duration: item.duration === undefined ? 20 : item.duration, shuffle: !!item.shuffle, maxScore: item.maxScore, updatedAt: item.updatedAt, parts: {} };
+    if (item.audioUrl) out.audioUrl = item.audioUrl;
+    for (const k of qcfg.PARTS) {
+      const p = item.parts && item.parts[k]; if (!p) continue;
+      out.parts[k] = { ...p, questions: (p.questions || []).map((q) => {
+        const { correct, answers, explanationHtml, ...rest } = q;
+        if (rest.statements) rest.statements = rest.statements.map((st) => { const { correct: c, explanationHtml: e, ...r } = st; return r; });
+        return rest;
+      }) };
+    }
+    return out;
+  }
+
+  async function createShare(uid, type, itemId) {
+    if (type !== 'quiz' && type !== 'essay') throw new HttpError(400, 'Loại bài không chia sẻ được', 'BAD_TYPE');
+    mustId(itemId);
+    const item = await getItem(uid, type, itemId);
+    const ref = await store.read('data', shareRefPath(uid, itemId), { fresh: true });
+    let sid = ref && ref.data.shareId;
+    if (sid && isId(sid)) {
+      const cur = await store.update('data', sharePath(sid), (d) => { if (!d) return undefined; d.enabled = true; d.title = item.title; d.subject = item.subject; return d; }, { message: `share ${sid}` });
+      if (cur) return { shareId: sid, enabled: true };
+    }
+    sid = randomId(12);
+    await store.create('data', sharePath(sid), { id: sid, ownerId: uid, itemId, type, title: item.title, subject: item.subject, enabled: true, createdAt: nowIso(), results: [] }, `share ${sid}`);
+    await store.write('data', shareRefPath(uid, itemId), { shareId: sid }, `share-ref ${itemId}`);
+    await store.update('data', indexPath(uid), (idx) => { if (idx.items[itemId]) idx.items[itemId].shareId = sid; return idx; }, { message: `index ${uid}`, defaultValue: emptyIndex() });
+    return { shareId: sid, enabled: true };
+  }
+
+  async function setShareEnabled(uid, sid, enabled) {
+    await loadShare(sid, uid, { ownerOnly: true, needEnabled: false });
+    await store.update('data', sharePath(sid), (d) => { d.enabled = !!enabled; return d; }, { message: `share ${sid}` });
+    return { shareId: sid, enabled: !!enabled };
+  }
+
+  async function getShared(uid, sid) {
+    const { doc, isOwner } = await loadShare(sid, uid);
+    const item = await sharedItem(doc);
+    return { share: { id: sid, itemId: doc.itemId, type: shareType(doc), title: item.title, subject: item.subject, isOwner, enabled: doc.enabled !== false, createdAt: doc.createdAt }, item: studentItem(item) };
+  }
+
+  /** Ảnh trong đề chia sẻ: chỉ trả ảnh thực sự nằm trong đề, giải mã bằng khoá của chủ bài. */
+  async function sharedImage(uid, sid, imageId) {
+    const { doc } = await loadShare(sid, uid);
+    const item = await sharedItem(doc);
+    if (!(item.images || []).includes(imageId)) throw new HttpError(404, 'Không có ảnh', 'NOT_FOUND');
+    return images.download(doc.ownerId, imageId);
+  }
+
+  async function recordResult(sid, entry) {
+    await store.update('data', sharePath(sid), (d) => {
+      if (!d) return undefined;
+      d.results = d.results || [];
+      if (d.results.some((r) => r.id === entry.id && r.uid === entry.uid)) return undefined;
+      d.results.push(entry);
+      if (d.results.length > MAX_SHARE_RESULTS) d.results = d.results.slice(-MAX_SHARE_RESULTS);
+      return d;
+    }, { message: `share ${sid}` });
+  }
+
+  /** Cập nhật điểm của một lượt nộp trên biểu đồ chung (khi AI chấm xong bài tự luận); chưa có dòng thì thêm. */
+  async function setResultScore(sid, entry) {
+    await store.update('data', sharePath(sid), (d) => {
+      if (!d) return undefined;
+      d.results = d.results || [];
+      const r = d.results.find((x) => x.id === entry.id && x.uid === entry.uid);
+      if (r) { r.score = entry.score; r.max = entry.max; if (!r.n && entry.n) r.n = entry.n; }
+      else d.results.push(entry);
+      if (d.results.length > MAX_SHARE_RESULTS) d.results = d.results.slice(-MAX_SHARE_RESULTS);
+      return d;
+    }, { message: `share ${sid}` });
+  }
+
+  /** Nộp bài chia sẻ: chấm bằng đề của chủ bài, lưu bài nộp vào kho CỦA NGƯỜI LÀM, thêm 1 điểm vào biểu đồ chung. */
+  async function submitShared(uid, name, sid, id, input = {}) {
+    mustId(id);
+    const { doc } = await loadShare(sid, uid);
+    const dup = await store.read('data', subPath(uid, id), { fresh: true });
+    if (dup) {
+      if (dup.data.shareId !== sid) throw new HttpError(409, 'Mã bài nộp đã được dùng', 'EXISTS');
+      await recordResult(sid, { id, uid, n: String(name || '').slice(0, 60), at: dup.data.submittedAt, score: dup.data.score, max: dup.data.max });
+      return dup.data;                                              // client retry → idempotent
+    }
+    const item = await sharedItem(doc);
+    const common = { id, ownerId: uid, itemId: doc.itemId, shareId: sid, title: item.title, subject: item.subject, submittedAt: nowIso(),
+      startedAt: input.startedAt || null, durationSec: Math.max(0, Math.min(86400, Number(input.durationSec) || 0)) };
+    let sub, pct;
+    if (shareType(doc) === 'essay') {
+      // Tự luận: KHÔNG chấm lúc nộp. Người làm tự bấm "Chấm bằng AI" → dùng nhà cung cấp/key trong tài khoản của họ; điểm lên biểu đồ sau đó.
+      const text = String(input.text || '').slice(0, 30000);
+      if (!text.trim()) throw new HttpError(400, 'Bài làm đang trống', 'VALIDATION');
+      sub = { ...common, type: 'essay', text, score: null, max: item.maxScore, selfScore: null, ai: null, note: '',
+        snapshot: { prompt: item.prompt, modelAnswer: item.modelAnswer, rubric: item.rubric, maxScore: item.maxScore } };
+      pct = null;
+    } else {
+      const answers = sanitizeAnswers(item, input.answers);
+      const result = gradeParts({ maxScore: item.maxScore, parts: item.parts }, answers);
+      sub = { ...common, type: 'quiz', answers, score: result.score, max: result.maxScore, correctCount: result.correctCount, total: result.totalCount, result, snapshot: { maxScore: item.maxScore, parts: item.parts } };
+      pct = result.maxScore ? Math.round((result.score / result.maxScore) * 100) : 0;
+    }
+    if (Buffer.byteLength(JSON.stringify(sub)) > 950 * 1024) throw new HttpError(413, 'Bài nộp quá lớn', 'TOO_LARGE');
+    try { await store.create('data', subPath(uid, id), sub, `submit ${id}`); }
+    catch (e) { if (e.code === 'EXISTS') return (await store.read('data', subPath(uid, id), { fresh: true })).data; throw e; }
+    await store.update('data', indexPath(uid), (idx) => {
+      idx.subs.unshift(subSummary(sub, pct)); idx.subs = idx.subs.slice(0, MAX_SUBS_IN_INDEX);
+      const it = idx.items[doc.itemId]; if (it) { it.attempts = (it.attempts || 0) + 1; it.lastAt = sub.submittedAt; if (pct != null && (it.bestPct == null || pct > it.bestPct)) it.bestPct = pct; }
+      return idx;
+    }, { message: `index ${uid}`, defaultValue: emptyIndex() });
+    await recordResult(sid, { id, uid, n: String(name || '').slice(0, 60), at: sub.submittedAt, score: sub.score, max: sub.max });
+    return sub;
+  }
+
+  /** Lịch sử + biểu đồ. Chủ bài: thấy tên từng người. Người làm: chỉ thấy bài + điểm của mình; điểm người khác ẩn danh. */
+  async function sharedHistory(uid, sid) {
+    const { doc, isOwner } = await loadShare(sid, uid);
+    const allResults = (doc.results || []).filter(Boolean);
+    const results = allResults.filter((r) => r.score != null);     // chỉ lượt đã có điểm mới lên biểu đồ
+    const points = results.map((r) => {
+      const t = Date.parse(r.at); const max = Number(r.max) || 10, raw = Number(r.score);
+      const mine = r.uid === uid;
+      const pt = { t, s: round2(Math.max(0, Math.min(10, (raw / max) * 10))), raw, max, q: 1, m: mine ? 1 : 0 };
+      if (isOwner) pt.n = r.n || '';
+      else if (mine) pt.id = r.id;
+      return pt;
+    }).filter((p) => !Number.isNaN(p.t)).sort((a, b) => a.t - b.t).slice(-5000);
+    const rows = allResults.filter((r) => isOwner || r.uid === uid).map((r) => ({ id: isOwner ? undefined : r.id, n: isOwner ? r.n : undefined, at: r.at, score: r.score == null ? null : r.score, max: r.max })).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const scored = rows.filter((r) => r.score != null).map((r) => (r.max ? (r.score / r.max) * 10 : 0));
+    return {
+      share: { id: sid, itemId: doc.itemId, type: shareType(doc), title: doc.title, subject: doc.subject, isOwner, enabled: doc.enabled !== false },
+      stats: { total: rows.length, pending: rows.filter((r) => r.score == null).length, students: isOwner ? new Set(allResults.map((r) => r.uid)).size : undefined, best: scored.length ? round2(Math.max(...scored)) : null },
+      points, rows: rows.slice(0, 300),
+    };
   }
 
   // ───────── Kho riêng tư (repo ACCOUNT) ─────────
@@ -359,7 +542,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { exportedAt: nowIso(), items: items.filter(Boolean), submissions: subs.filter(Boolean) };
   }
 
-  return { overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs };
+  return { overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
 }
 
 module.exports = { createContent };

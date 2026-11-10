@@ -118,20 +118,29 @@ export async function ping(onSlow) {
 }
 
 // ── ảnh: <img> không gửi được header Authorization → tải bằng fetch rồi tạo blob URL ──
+// Đang xem bài được chia sẻ (đề / bài nộp của đề đó) → imageCtx.share = shareId: ảnh tải qua /api/shares/:id/images/:imgId (khoá giải mã của chủ bài).
+export const imageCtx = { share: null };
 const blobCache = new Map();
 export function imageUrl(id) {
-  if (!blobCache.has(id)) {
-    blobCache.set(id, (async () => {
+  const share = imageCtx.share, ck = (share || '') + ':' + id, path = share ? `/api/shares/${share}/images/${id}` : `/api/images/${id}`;
+  if (!blobCache.has(ck)) {
+    blobCache.set(ck, (async () => {
       const token = (session.get() || {}).accessToken;
-      let res = await fetchJson('GET', `/api/images/${id}`, undefined, { Authorization: `Bearer ${token}` }, 40000, { binary: true }).catch(async (e) => {
-        if (e.status === 401) { const t = await refresh(); return fetchJson('GET', `/api/images/${id}`, undefined, { Authorization: `Bearer ${t}` }, 40000, { binary: true }); }
+      let res = await fetchJson('GET', path, undefined, { Authorization: `Bearer ${token}` }, 40000, { binary: true }).catch(async (e) => {
+        if (e.status === 401) { const t = await refresh(); return fetchJson('GET', path, undefined, { Authorization: `Bearer ${t}` }, 40000, { binary: true }); }
         throw e;
       });
       return URL.createObjectURL(await res.blob());
-    })().catch((e) => { blobCache.delete(id); throw e; }));
+    })().catch((e) => { blobCache.delete(ck); throw e; }));
   }
-  return blobCache.get(id);
+  return blobCache.get(ck);
 }
+
+// ── nhớ trang đích khi chưa đăng nhập (mở link chia sẻ → đăng nhập → quay lại đúng bài) ──
+export const nextPage = {
+  save(path) { try { sessionStorage.setItem('utc.next', path); } catch { /* bỏ qua */ } },
+  take() { try { const v = sessionStorage.getItem('utc.next'); sessionStorage.removeItem('utc.next'); return v && /^\/s\/[a-f0-9]+(\/(play|history))?$/.test(v) ? v : null; } catch { return null; } },
+};
 
 /** Nén ảnh phía trình duyệt (≤ ~1600px, JPEG) để vừa giới hạn 4,5MB của Vercel, rồi tải lên. */
 export async function uploadImage(file) {

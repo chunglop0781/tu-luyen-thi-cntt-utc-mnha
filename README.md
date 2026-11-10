@@ -77,6 +77,17 @@ Thanh trên cùng hiện **email đăng nhập** (tài khoản cũ chưa có ema
 - Gemini quá tải (503/timeout) → tự thử tối đa 2 model dự phòng, trong ngân sách ~52 giây (Vercel giới hạn 60 giây/hàm).
 - Lỗi key sai/hết hạn mức trả về mã 400/429 (không bao giờ 401 để khỏi bị đăng xuất nhầm). Giới hạn: 15 lần chấm/phân tích AI và 20 lần thử kết nối mỗi giờ. Kết quả phân tích lưu trong bài nộp (`aiAnalyses`).
 
+## Chia sẻ bài (trắc nghiệm + tự luận) + lịch sử của nhóm
+- Trang chủ → thẻ bài (trắc nghiệm hoặc tự luận) → **🔗 Chia sẻ** → sao chép link dạng `https://TEN_GITHUB.github.io/TEN_REPO/frontend/#/s/<shareId>` (kiểu `/lessons/<id>/share` của bản cũ). Có nút **Tắt chia sẻ**; bật lại vẫn dùng đúng link cũ.
+- Người nhận mở link: **chưa đăng nhập thì bị chuyển sang đăng nhập/đăng ký, xong quay lại đúng bài**. Bài làm lưu trong **kho riêng của người làm** (`u/<uid>/submissions`); đề được gửi xuống **không kèm đáp án/giải thích**, máy chủ chấm khi nộp; ảnh trong đề tải qua `/api/shares/:id/images/:imgId` (chỉ ảnh nằm trong đề).
+- Trang `#/s/<id>/history` (chuyển từ `/lessons/:id/history` của luyen-thi): thống kê, **biểu đồ điểm theo thời gian** (1 ngày/1 tháng/1 năm/tất cả, theo năm-tháng-ngày, 10 khoảng điểm [0,1]…[9,10], nối điểm) và bảng.
+  - **Chủ bài**: thấy tên từng người, điểm, giờ nộp; *không* đọc được bài làm.
+  - **Người làm**: chỉ thấy bài làm + điểm của mình (bấm điểm để xem lại); điểm người khác hiện ẩn danh trên biểu đồ.
+- Dữ liệu: `…-data/shares/<shareId>.json` (chủ bài, loại bài, trạng thái, danh sách `{id, uid, tên, giờ, điểm}`).
+- **Bài nộp từ link chia sẻ không xoá được** (như luyen-thi) nên điểm không biến mất khỏi biểu đồ chung.
+- **Tự luận**: nộp xong chưa có điểm (hiện “Chờ chấm AI”, chưa lên biểu đồ). Người làm tự bấm **🤖 Chấm bằng AI** — dùng nhà cung cấp + API key trong tài khoản của CHÍNH họ (Cài đặt → Nhà cung cấp AI); chỉ chấm được **một lần**, không tự nhập điểm. Chấm xong điểm (quy về thang 10) mới lên biểu đồ. Người làm không thấy đáp án mẫu trước khi nộp; chủ bài không đọc được bài làm của người khác.
+- Test: `npm test` (backend, có mục “Chia sẻ bài trắc nghiệm” và “Chia sẻ bài tự luận”) và `NODE_PATH=test/stubs/node_modules:<playwright> node test/e2e-share.js` (trình duyệt thật).
+
 ## Kiểm thử
 ```
 cd backend

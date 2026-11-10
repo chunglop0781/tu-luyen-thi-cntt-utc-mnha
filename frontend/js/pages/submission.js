@@ -1,14 +1,16 @@
-import { get, patch, post, del } from '../api.js';
+import { get, patch, post, del, imageCtx } from '../api.js';
 import { h, action, toast, rich, fmtDate, fmtDur, pctClass, confirmBox, safeHtml, richOrHtml } from '../ui.js';
 
 export async function submissionPage(ctx, id) {
   let { submission: s } = await get(`/api/submissions/${id}`);
+  if (s.shareId) imageCtx.share = s.shareId;      // bài làm từ đề được chia sẻ: ảnh trong đề tải qua link chia sẻ
   let aiInfo = null;                       // nhà cung cấp/model + key nào đã có (dùng cho chấm AI tự luận và phân tích AI trắc nghiệm)
   try { const [{ providers }, { vault }] = await Promise.all([get('/api/ai/providers'), get('/api/me/vault')]); aiInfo = { providers, vault }; } catch { aiInfo = null; }
   const root = h('div', { class: 'stack' });
   const draw = () => root.replaceChildren(s.type === 'quiz' ? quizView(s, (n) => { s = n; draw(); }, aiInfo) : essayView(s, (n) => { s = n; draw(); }, aiInfo),
-    h('div', { class: 'row' }, h('a', { class: 'btn', href: `#/${s.type}/${s.itemId}` }, 'Làm lại'), h('a', { class: 'btn ghost', href: '#/history' }, 'Lịch sử'),
-      h('button', { class: 'btn ghost danger', onclick: async () => { if (await confirmBox('Xoá bài nộp này?')) { try { await del(`/api/submissions/${id}`); toast('Đã xoá', 'ok'); ctx.go('/history'); } catch (e) { toast(e.message, 'err'); } } } }, 'Xoá bài nộp')));
+    h('div', { class: 'row' }, h('a', { class: 'btn', href: s.shareId ? `#/s/${s.shareId}/play` : `#/${s.type}/${s.itemId}` }, 'Làm lại'), s.shareId ? h('a', { class: 'btn', href: `#/s/${s.shareId}/history` }, '📊 Biểu đồ điểm của nhóm') : null, h('a', { class: 'btn ghost', href: '#/history' }, 'Lịch sử'),
+      s.shareId ? h('span', { class: 'muted', title: 'Bài nộp từ link chia sẻ đã nằm trong biểu đồ chung nên không xoá được' }, '🔒 Không xoá được (bài chia sẻ)')
+        : h('button', { class: 'btn ghost danger', onclick: async () => { if (await confirmBox('Xoá bài nộp này?')) { try { await del(`/api/submissions/${id}`); toast('Đã xoá', 'ok'); ctx.go('/history'); } catch (e) { toast(e.message, 'err'); } } } }, 'Xoá bài nộp')));
   draw();
   return root;
 }
@@ -60,20 +62,21 @@ function quizView(s, set, aiInfo) {
 
 function essayView(s, set, aiInfo) {
   const sug = s.suggestion || {};
+  const shared = !!s.shareId;                       // bài từ link chia sẻ: điểm chỉ do AI chấm (key của chính bạn), không tự nhập điểm
   const score = h('input', { type: 'number', min: 0, max: s.max, step: '0.25', value: s.selfScore ?? '', placeholder: `0–${s.max}` });
   const note = h('textarea', { rows: 3, placeholder: 'Ghi chú sau khi đối chiếu (điểm yếu, cần ôn gì…)' }); note.value = s.note || '';
-  const saveBtn = h('button', { class: 'btn primary' }, 'Lưu điểm tự chấm');
-  saveBtn.addEventListener('click', action(saveBtn, async () => { const r = await patch(`/api/submissions/${s.id}`, { selfScore: score.value === '' ? null : Number(score.value), note: note.value }); toast('Đã lưu', 'ok'); set(r.submission); }));
+  const saveBtn = h('button', { class: 'btn primary' }, s.shareId ? 'Lưu ghi chú' : 'Lưu điểm tự chấm');
+  saveBtn.addEventListener('click', action(saveBtn, async () => { const r = await patch(`/api/submissions/${s.id}`, shared ? { note: note.value } : { selfScore: score.value === '' ? null : Number(score.value), note: note.value }); toast('Đã lưu', 'ok'); set(r.submission); }));
   const aiPanel = aiGradePanel(s, set, aiInfo);
   return h('div', { class: 'stack' },
-    h('div', { class: 'card center' }, h('h2', null, s.title), h('div', { class: `bigscore ${pctClass(s.score == null ? null : (s.score / s.max) * 100)}` }, s.score == null ? 'Chờ chấm' : `${s.score}/${s.max}`),
+    h('div', { class: 'card center' }, h('h2', null, s.title), h('div', { class: `bigscore ${pctClass(s.score == null ? null : (s.score / s.max) * 100)}` }, s.score == null ? (shared ? 'Chờ chấm AI' : 'Chờ chấm') : `${s.score}/${s.max}`),
       h('p', { class: 'muted' }, `${fmtDate(s.submittedAt)} · ${fmtDur(s.durationSec)}`)),
     h('div', { class: 'card' }, h('h3', null, 'Đề bài'), richOrHtml(s.snapshot.prompt)),
     h('div', { class: 'card' }, h('h3', null, 'Bài làm của bạn'), h('div', { class: 'rich' }, s.text)),
     s.snapshot.modelAnswer ? h('div', { class: 'card' }, h('h3', null, 'Đáp án mẫu'), richOrHtml(s.snapshot.modelAnswer)) : null,
-    sug.score != null ? h('div', { class: 'card' }, h('h3', null, `Gợi ý tự động: ${sug.score}/${sug.max}`), h('p', { class: 'muted' }, sug.method === 'rubric' ? 'Theo từ khoá trong tiêu chí chấm.' : `Theo độ phủ từ khoá của đáp án mẫu (${sug.coverage}%).`),
+    !shared && sug.score != null ? h('div', { class: 'card' }, h('h3', null, `Gợi ý tự động: ${sug.score}/${sug.max}`), h('p', { class: 'muted' }, sug.method === 'rubric' ? 'Theo từ khoá trong tiêu chí chấm.' : `Theo độ phủ từ khoá của đáp án mẫu (${sug.coverage}%).`),
       ...(sug.details || []).map((d) => h('p', null, h('b', null, `${d.name}: ${d.got}/${d.points}`), d.missing.length ? h('span', { class: 'muted' }, ' — thiếu: ' + d.missing.join(', ')) : ' ✔'))) : null,
-    h('div', { class: 'card stack' }, h('h3', null, 'Tự chấm'), h('div', { class: 'row' }, score, saveBtn), note),
+    h('div', { class: 'card stack' }, h('h3', null, shared ? 'Ghi chú' : 'Tự chấm'), shared ? h('p', { class: 'muted' }, 'Bài làm từ link chia sẻ chỉ có điểm do AI chấm; điểm này sẽ lên biểu đồ chung.') : null, h('div', { class: 'row' }, shared ? null : score, saveBtn), note),
     aiPanel);
 }
 
@@ -88,11 +91,12 @@ function aiGradePanel(s, set, info) {
   const card = (...kids) => h('div', { class: 'card stack' }, h('h3', null, 'Chấm bằng AI'), result, ...kids);
   if (!info) return card(h('p', { class: 'muted' }, 'Không tải được cấu hình AI. Thử tải lại trang.'));
   const ready = info.providers.filter((p) => p.enabled !== false && (info.vault.items[p.id] || {}).keySet);
+  if (s.shareId && s.ai) return card(h('p', { class: 'muted' }, 'Bài từ link chia sẻ chỉ được chấm AI một lần — điểm đã lên biểu đồ chung.'));
   if (!ready.length) return card(h('p', { class: 'muted' }, 'Chưa có API key AI nào. ', h('a', { href: '#/settings/ai' }, 'Vào Cài đặt → Nhà cung cấp AI'), ' để thêm nhà cung cấp và dán key.'));
 
   let cur = ready.some((p) => p.id === info.vault.provider) ? info.vault.provider : ready[0].id;
   const row = h('div', { class: 'ai-pick' });
-  const btn = h('button', { class: 'btn' }, '🤖 Chấm bằng AI');
+  const btn = h('button', { class: 'btn', id: 'aiGradeBtn' }, '🤖 Chấm bằng AI');
   let provSel, modelEl;
   const drawPick = () => {
     const p = info.providers.find((x) => x.id === cur), saved = (info.vault.items[cur] || {}).model || '';
@@ -107,7 +111,7 @@ function aiGradePanel(s, set, info) {
     const r = await post(`/api/submissions/${s.id}/ai-grade`, { provider: cur, model: (modelEl.value || '').trim() || undefined }, { timeout: 70000 });
     toast('AI đã chấm xong', 'ok'); set(r.submission);
   }));
-  return card(row, h('p', { class: 'muted' }, s.ai ? 'Chấm lại sẽ ghi đè kết quả AI trước đó.' : 'Mặc định dùng nhà cung cấp/model trong Cài đặt; chọn khác nếu muốn thử.'));
+  return card(row, h('p', { class: 'muted' }, s.shareId ? 'Dùng API key của bạn. Chỉ chấm được MỘT lần — chọn nhà cung cấp/model rồi bấm chấm.' : s.ai ? 'Chấm lại sẽ ghi đè kết quả AI trước đó.' : 'Mặc định dùng nhà cung cấp/model trong Cài đặt; chọn khác nếu muốn thử.'));
 }
 
 
