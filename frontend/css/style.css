@@ -205,6 +205,7 @@ input[type=checkbox],input[type=radio]{padding:0;flex:none!important;width:1rem!
 .diag{white-space:pre-wrap;background:var(--g50);border:1px solid var(--g200);padding:.75rem;border-radius:.5rem;font-size:.75rem;overflow:auto;margin:0}
 code{background:var(--g100);padding:1px 6px;border-radius:.375rem;font-size:.875em}
 details summary{cursor:pointer;font-weight:600}
+<<<<<<< HEAD
 details[open] summary{margin-bottom:.75rem}
 .loading{padding:2rem;text-align:center}
 .loading::before{content:"";display:inline-block;width:1rem;height:1rem;margin-right:.5rem;border:2px solid var(--g300);border-top-color:var(--i600);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
@@ -214,3 +215,6 @@ details[open] summary{margin-bottom:.75rem}
 .toast{background:var(--g800);color:#fff;padding:.75rem 1rem;border-radius:.75rem;box-shadow:0 10px 15px -3px #0000002e;font-size:.875rem}
 .toast.ok{background:var(--green600)}
 .toast.err{background:var(--red600)}
+=======
+.otp{text-align:center;font-size:22px;letter-spacing:6px;font-weight:700}
+>>>>>>> fd2799a (Update 10-05-18_10-11-2026)

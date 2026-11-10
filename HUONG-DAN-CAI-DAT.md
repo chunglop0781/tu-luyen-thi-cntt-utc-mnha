@@ -335,6 +335,8 @@ Backend trên máy vẫn dùng **GitHub thật** (cần token và repo), nên v�
 
 | Triệu chứng | Nguyên nhân / cách sửa |
 |---|---|
+| Vào `https://TEN_GITHUB.github.io/tu-luyen-thi-cntt-utc-mnha/` chỉ thấy nội dung README (trang Jekyll) | Pages đang lấy sai nguồn. Cách chuẩn: *Settings → Pages → Source = **GitHub Actions*** rồi vào tab *Actions* chạy lại workflow "Deploy frontend to GitHub Pages" (cần có thư mục `.github/workflows/pages.yml` trên repo: kéo-thả file lên web thường **bỏ sót thư mục/tệp bắt đầu bằng dấu chấm**, hãy dùng `git push`). Hoặc để *Deploy from a branch → main → /(root)*: `index.html` ở gốc sẽ tự chuyển sang `frontend/` |
+| Sửa `config.js` ở gốc mà web không đổi | Giao diện đọc `frontend/config.js` (không phải `config.js` ở gốc). Sửa `API_BASE` trong `frontend/config.js`, commit + push |
 | Trang báo "Chưa cấu hình backend" | `API_BASE` trong `config.js` vẫn là `TEN-PROJECT`. Sửa thành địa chỉ Vercel, commit và push (bước C) |
 | Thanh đỏ "Không kết nối được máy chủ… CORS" | `FRONTEND_ORIGINS` sai. Phải là `https://TEN_GITHUB.github.io` (không có đường dẫn repo), sửa xong **Redeploy** |
 | Vercel trả 404 ở mọi đường dẫn | Chưa đặt **Root Directory = `backend`** (*Settings → General*), đặt lại rồi Redeploy |
