@@ -9,8 +9,11 @@ const { createImages } = require('./services/images');
 const { createContent } = require('./services/content');
 const { createWebhook } = require('./services/webhook');
 const { pruneRepo } = require('./services/prune');
-const { parseQuizText } = require('./services/validate');
+const { previewQuiz } = require('./services/validate');
 const { safeEqual } = require('./crypto');
+const qcfg = require('./services/quiz/config');
+const { ALLOWED_AUDIO_HOSTS } = require('./services/quiz/audio');
+const quizPublicConfig = () => ({ authoringPrompt: qcfg.QUIZ_AUTHORING_PROMPT, allowedImageHosts: qcfg.ALLOWED_IMAGE_HOSTS, allowedAudioHosts: ALLOWED_AUDIO_HOSTS, maxOptions: qcfg.LIMITS.MAX_OPTIONS_PER_QUESTION, tfMinStatements: qcfg.LIMITS.MIN_STATEMENTS_TF, tfMaxStatements: qcfg.LIMITS.MAX_STATEMENTS_TF, tfThptqgStatements: qcfg.TF_THPTQG_STATEMENTS, defaults: { ppq: qcfg.DEFAULT_POINTS_PER_QUESTION, maxScore: qcfg.DEFAULT_MAX_SCORE, duration: 20 }, durationLimits: { min: 1, max: 600 } });
 
 /** Giới hạn tốc độ trong RAM (tốt nhất có thể trên serverless). */
 function limiter() {
@@ -24,7 +27,7 @@ function limiter() {
   };
 }
 
-function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl } = {}) {
+function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, dnsLookup } = {}) {
   const cfg = config(env);
   const gh = new GitHub({ token: cfg.token, owner: cfg.owner, branch: cfg.branch, fetchImpl });
   const store = new Store(gh, { account: cfg.accountRepo, data: cfg.dataRepo });
@@ -32,7 +35,7 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl }
   const images = createImages({ cfg, gh, store, ensureWebhook: (r) => wh.ensureHook(gh, r) });
   const mailer = mailerImpl || createMailer(cfg);
   const auth = createAuth({ cfg, store, mailer });
-  const content = createContent({ cfg, store, images, fetchImpl: aiFetch });
+  const content = createContent({ cfg, store, images, fetchImpl: aiFetch, lookup: dnsLookup });
   const allow = limiter();
   const router = new Router();
 
@@ -76,7 +79,7 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl }
     await auth.resetConfirm(ctx.body); return { ok: true };
   });
   router.post('/api/auth/login', async (ctx) => {
-    if (!allow('login:' + ip(ctx.req), 20, 600e3) || !allow('loginu:' + String(ctx.body.username).toLowerCase(), 10, 600e3)) throw new HttpError(429, 'Thử đăng nhập quá nhiều lần, đợi vài phút', 'RATE');
+    if (!allow('login:' + ip(ctx.req), 20, 600e3) || !allow('loginu:' + String(ctx.body.identifier !== undefined ? ctx.body.identifier : ctx.body.username).trim().toLowerCase(), 10, 600e3)) throw new HttpError(429, 'Thử đăng nhập quá nhiều lần, đợi vài phút', 'RATE');
     return { ok: true, ...(await auth.login(ctx.body, ua(ctx.req))) };
   });
   router.post('/api/auth/refresh', async (ctx) => ({ ok: true, ...(await auth.refresh(ctx.body.refreshToken)) }));
@@ -90,7 +93,10 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl }
   router.put('/api/me/vault', async (ctx) => ({ ok: true, vault: await content.writeVault(authed(ctx).sub, ctx.body) }));
 
   // ── AI: danh sách nhà cung cấp/model + thử kết nối bằng key của chính người dùng ──
-  router.get('/api/ai/providers', async (ctx) => { authed(ctx); return { ok: true, providers: content.aiProviders() }; });
+  router.get('/api/ai/providers', async (ctx) => ({ ok: true, ...(await content.aiProviders(authed(ctx).sub)) }));
+  router.post('/api/ai/providers', async (ctx) => ({ ok: true, provider: await content.saveProvider(authed(ctx).sub, null, ctx.body) }), { status: 201 });
+  router.put('/api/ai/providers/:id', async (ctx) => ({ ok: true, provider: await content.saveProvider(authed(ctx).sub, ctx.params.id, ctx.body) }));
+  router.delete('/api/ai/providers/:id', async (ctx) => { await content.deleteProvider(authed(ctx).sub, ctx.params.id); return { ok: true }; });
   router.post('/api/ai/test', async (ctx) => {
     const a = authed(ctx); if (!allow('aitest:' + a.sub, 20, 3600e3)) throw new HttpError(429, 'Thử kết nối AI quá nhiều lần trong 1 giờ', 'RATE');
     return { ok: true, result: await content.testAi(a.sub, { provider: ctx.body.provider, model: ctx.body.model }) };
@@ -100,11 +106,8 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl }
   router.get('/api/overview', async (ctx) => ({ ok: true, ...(await content.overview(authed(ctx).sub)) }));
   router.post('/api/reindex', async (ctx) => { await content.reindex(authed(ctx).sub); return { ok: true, ...(await content.overview(authed(ctx).sub)) }; });
   router.get('/api/export', async (ctx) => ({ ok: true, ...(await content.exportAll(authed(ctx).sub)) }));
-  router.post('/api/quizzes/parse', async (ctx) => {
-    authed(ctx); const questions = parseQuizText(ctx.body.text);
-    if (!questions.length) throw new HttpError(400, 'Không đọc được câu hỏi nào', 'VALIDATION');
-    return { ok: true, questions };
-  });
+  router.get('/api/quizzes/config', async (ctx) => { authed(ctx); return { ok: true, config: quizPublicConfig() }; });   // prompt mẫu + giới hạn đề 3 phần
+  router.post('/api/quizzes/parse', async (ctx) => { authed(ctx); return { ok: true, preview: previewQuiz(ctx.body) }; });   // xem trước / bắt lỗi đề 3 phần
   for (const [type, seg] of [['essay', 'essays'], ['quiz', 'quizzes']]) {
     router.get(`/api/${seg}/:id`, async (ctx) => ({ ok: true, item: await content.getItem(authed(ctx).sub, type, ctx.params.id) }));
     router.put(`/api/${seg}/:id`, async (ctx) => ({ ok: true, item: await content.putItem(authed(ctx).sub, type, ctx.params.id, ctx.body) }));
@@ -176,7 +179,7 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl }
       else if (e instanceof GitHubError) { status = e.limited ? 503 : 502; msg = e.limited ? 'GitHub đang giới hạn tốc độ, thử lại sau ít giây' : 'Kho dữ liệu GitHub tạm thời lỗi, thử lại'; code = 'GITHUB'; console.error('[github]', e.status, e.message); }
       else console.error('[server]', e);
       const extra = { ...cors }; if (e && e.retryAfter) extra['Retry-After'] = String(e.retryAfter);
-      return sendJson(res, status, { ok: false, error: msg, code }, extra);
+      return sendJson(res, status, { ok: false, error: msg, code, ...(e && e.errors ? { errors: e.errors } : {}) }, extra);
     }
   }
 

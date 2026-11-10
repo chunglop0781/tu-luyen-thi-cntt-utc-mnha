@@ -1,5 +1,5 @@
 import { get, patch, post, del } from '../api.js';
-import { h, action, toast, rich, fmtDate, fmtDur, pctClass, confirmBox } from '../ui.js';
+import { h, action, toast, rich, fmtDate, fmtDur, pctClass, confirmBox, safeHtml, richOrHtml } from '../ui.js';
 
 export async function submissionPage(ctx, id) {
   let { submission: s } = await get(`/api/submissions/${id}`);
@@ -13,22 +13,49 @@ export async function submissionPage(ctx, id) {
   return root;
 }
 
+const PART_TITLES = { mcq: 'Phần 1 · Trắc nghiệm nhiều đáp án', tf: 'Phần 2 · Đúng / Sai', fill: 'Phần 3 · Điền số liệu / đáp án' };
+const tfWord = (v) => (v === true ? 'Đúng' : v === false ? 'Sai' : 'Bỏ trống');
+const expl = (html) => (html ? h('div', { class: 'expl' }, '💡 ', safeHtml(html)) : null);
+const imgOf = (src) => (src ? (/^\[img:/.test(src) ? rich(src) : null) : null);
+
+/** Kết quả đề 3 phần (đáp án đúng/sai từng câu, từng ý Đúng-Sai, ô điền) — cùng cách đánh số "Câu N" với màn làm bài và phân tích AI. */
 function quizView(s, set, aiInfo) {
+  const res = s.result || { items: [], parts: {} };
   const pct = s.max ? Math.round((s.score / s.max) * 100) : 0;
-  const byId = Object.fromEntries(s.results.map((r) => [r.id, r]));
-  return h('div', { class: 'stack' },
+  const items = Object.fromEntries((res.items || []).map((r) => [r.id, r]));
+  const parts = (s.snapshot && s.snapshot.parts) || {};
+  const cards = []; let n = 0;
+  for (const k of ['mcq', 'tf', 'fill']) {
+    const p = parts[k]; if (!p || !p.questions.length) continue;
+    const ps = (res.parts || {})[k];
+    cards.push(h('h3', null, PART_TITLES[k], ps ? h('small', { class: 'muted' }, ` — ${ps.correct}/${ps.total} đúng · ${ps.earned}/${ps.points} điểm`) : null));
+    const clusters = Object.fromEntries((p.clusters || []).map((c) => [c.id, c])); let lastCl = null;
+    for (const q of p.questions) {
+      n++;
+      if (q.clusterId && q.clusterId !== lastCl && clusters[q.clusterId]) cards.push(h('div', { class: 'card rubric' }, h('b', null, 'Dữ kiện chung'), safeHtml(clusters[q.clusterId].text), imgOf(clusters[q.clusterId].image)));
+      lastCl = q.clusterId || null;
+      const it = items[q.id] || {};
+      let body, ok;
+      if (k === 'mcq') {
+        const chosen = Array.isArray(it.studentAnswer) ? it.studentAnswer : []; ok = !!it.correct;
+        body = [...q.options.map((o) => { const isC = (q.correct || []).includes(o.key), picked = chosen.includes(o.key);
+          return h('div', { class: `opt-r ${isC ? 'is-correct' : ''} ${picked && !isC ? 'is-wrong' : ''}` }, h('b', null, o.key + '.'), ' ', rich(o.text), picked ? h('small', null, ' ← bạn chọn') : null, isC ? h('small', null, ' ✔') : null); }), expl(q.explanationHtml)];
+      } else if (k === 'tf') {
+        const sts = q.statements.map((st) => ({ st, r: items[st.id] || {} })); ok = sts.every((x) => x.r.correct);
+        body = sts.map(({ st, r }) => h('div', { class: `opt-r ${r.correct ? 'is-correct' : 'is-wrong'}` }, rich(st.text), h('small', null, ` — đáp án: ${tfWord(st.correct)} · bạn chọn: ${tfWord(r.studentAnswer)} ${r.correct ? '✔' : '✘'}`), expl(st.explanationHtml)));
+      } else {
+        ok = !!it.correct;
+        body = [h('div', { class: `opt-r ${ok ? 'is-correct' : 'is-wrong'}` }, h('b', null, 'Bạn điền: '), it.studentAnswer || '(bỏ trống)', ok ? ' ✔' : null), ok ? null : h('div', { class: 'opt-r is-correct' }, h('b', null, 'Đáp án: '), (q.answers || []).join(' | ')), expl(q.explanationHtml)];
+      }
+      cards.push(h('div', { class: `card qcard ${ok ? 'right' : 'wrong'}`, id: `qc-${n}` }, h('b', null, `Câu ${n} ${ok ? '✅' : '❌'}`), ' ', rich(q.text), imgOf(q.image), ...body));
+    }
+  }
+  const root = h('div', { class: 'stack' },
     h('div', { class: 'card center' }, h('h2', null, s.title), h('div', { class: `bigscore ${pctClass(pct)}` }, `${s.score}/${s.max}`),
-      h('p', null, `${s.correctCount}/${s.total} câu đúng · ${pct}% · ${fmtDur(s.durationSec)} · ${fmtDate(s.submittedAt)}`)),
-    ...s.snapshot.map((q, i) => {
-      const r = byId[q.id] || { chosen: [], ok: false };
-      return h('div', { class: `card qcard ${r.ok ? 'right' : 'wrong'}`, id: `qc-${i + 1}` }, h('b', null, `Câu ${i + 1} ${r.ok ? '✅' : '❌'}`), ' ', rich(q.text),
-        ...q.options.map((o) => {
-          const isC = q.correct.includes(o.id), picked = r.chosen.includes(o.id);
-          return h('div', { class: `opt-r ${isC ? 'is-correct' : ''} ${picked && !isC ? 'is-wrong' : ''}` }, h('b', null, o.id + '.'), rich(o.text), picked ? h('small', null, ' ← bạn chọn') : null, isC ? h('small', null, ' ✔') : null);
-        }), q.explanation ? h('div', { class: 'expl' }, '💡 ', rich(q.explanation)) : null);
-    }),
-    ...(s.aiAnalyses || []).map((a, i) => analysisCard(a, i + 1, aiInfo)),
-    aiAnalyzePanel(s, set, aiInfo));
+      h('p', null, `${s.correctCount}/${s.total} đúng · ${pct}% · ${fmtDur(s.durationSec)} · ${fmtDate(s.submittedAt)}`)),
+    ...cards, ...(s.aiAnalyses || []).map((a, i) => analysisCard(a, i + 1, aiInfo)), aiAnalyzePanel(s, set, aiInfo));
+  if (window.MathJax && window.MathJax.typesetPromise) setTimeout(() => window.MathJax.typesetPromise([root]).catch(() => {}), 0);
+  return root;
 }
 
 function essayView(s, set, aiInfo) {
@@ -41,9 +68,9 @@ function essayView(s, set, aiInfo) {
   return h('div', { class: 'stack' },
     h('div', { class: 'card center' }, h('h2', null, s.title), h('div', { class: `bigscore ${pctClass(s.score == null ? null : (s.score / s.max) * 100)}` }, s.score == null ? 'Chờ chấm' : `${s.score}/${s.max}`),
       h('p', { class: 'muted' }, `${fmtDate(s.submittedAt)} · ${fmtDur(s.durationSec)}`)),
-    h('div', { class: 'card' }, h('h3', null, 'Đề bài'), rich(s.snapshot.prompt)),
+    h('div', { class: 'card' }, h('h3', null, 'Đề bài'), richOrHtml(s.snapshot.prompt)),
     h('div', { class: 'card' }, h('h3', null, 'Bài làm của bạn'), h('div', { class: 'rich' }, s.text)),
-    s.snapshot.modelAnswer ? h('div', { class: 'card' }, h('h3', null, 'Đáp án mẫu'), rich(s.snapshot.modelAnswer)) : null,
+    s.snapshot.modelAnswer ? h('div', { class: 'card' }, h('h3', null, 'Đáp án mẫu'), richOrHtml(s.snapshot.modelAnswer)) : null,
     sug.score != null ? h('div', { class: 'card' }, h('h3', null, `Gợi ý tự động: ${sug.score}/${sug.max}`), h('p', { class: 'muted' }, sug.method === 'rubric' ? 'Theo từ khoá trong tiêu chí chấm.' : `Theo độ phủ từ khoá của đáp án mẫu (${sug.coverage}%).`),
       ...(sug.details || []).map((d) => h('p', null, h('b', null, `${d.name}: ${d.got}/${d.points}`), d.missing.length ? h('span', { class: 'muted' }, ' — thiếu: ' + d.missing.join(', ')) : ' ✔'))) : null,
     h('div', { class: 'card stack' }, h('h3', null, 'Tự chấm'), h('div', { class: 'row' }, score, saveBtn), note),
@@ -60,8 +87,8 @@ function aiGradePanel(s, set, info) {
     s.ai.strengths.length ? h('p', null, '👍 ', s.ai.strengths.join('; ')) : null, s.ai.weaknesses.length ? h('p', null, '⚠️ ', s.ai.weaknesses.join('; ')) : null) : null;
   const card = (...kids) => h('div', { class: 'card stack' }, h('h3', null, 'Chấm bằng AI'), result, ...kids);
   if (!info) return card(h('p', { class: 'muted' }, 'Không tải được cấu hình AI. Thử tải lại trang.'));
-  const ready = info.providers.filter((p) => (info.vault.items[p.id] || {}).keySet);
-  if (!ready.length) return card(h('p', { class: 'muted' }, 'Chưa có API key AI nào. ', h('a', { href: '#/settings' }, 'Vào Cài đặt → Kết nối AI'), ' để thêm (Gemini, vilao.ai, ChatGPT, DeepSeek, OpenRouter).'));
+  const ready = info.providers.filter((p) => p.enabled !== false && (info.vault.items[p.id] || {}).keySet);
+  if (!ready.length) return card(h('p', { class: 'muted' }, 'Chưa có API key AI nào. ', h('a', { href: '#/settings/ai' }, 'Vào Cài đặt → Nhà cung cấp AI'), ' để thêm nhà cung cấp và dán key.'));
 
   let cur = ready.some((p) => p.id === info.vault.provider) ? info.vault.provider : ready[0].id;
   const row = h('div', { class: 'ai-pick' });
@@ -113,8 +140,8 @@ function aiAnalyzePanel(s, set, info) {
   const used = (s.aiAnalyses || []).length;
   const card = (...kids) => h('div', { class: 'card stack' }, h('h3', null, 'Phân tích AI'), ...kids);
   if (!info) return card(h('p', { class: 'muted' }, 'Không tải được cấu hình AI. Thử tải lại trang.'));
-  const ready = info.providers.filter((p) => (info.vault.items[p.id] || {}).keySet);
-  if (!ready.length) return card(h('p', { class: 'muted' }, 'Chưa có API key AI nào. ', h('a', { href: '#/settings' }, 'Vào Cài đặt → Kết nối AI'), ' để thêm (Gemini, vilao.ai, ChatGPT, DeepSeek, OpenRouter).'));
+  const ready = info.providers.filter((p) => p.enabled !== false && (info.vault.items[p.id] || {}).keySet);
+  if (!ready.length) return card(h('p', { class: 'muted' }, 'Chưa có API key AI nào. ', h('a', { href: '#/settings/ai' }, 'Vào Cài đặt → Nhà cung cấp AI'), ' để thêm nhà cung cấp và dán key.'));
   if (used >= MAX_ANALYSES) return card(h('p', { class: 'muted' }, `Đã dùng hết ${MAX_ANALYSES} lần phân tích cho bài nộp này.`));
 
   let cur = ready.some((p) => p.id === info.vault.provider) ? info.vault.provider : ready[0].id;

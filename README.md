@@ -55,32 +55,32 @@ Giao diện (`index.html`, `404.html`, `config.js`, `css/`, `js/`, `img/`) nằm
 Trang **Cài đặt → Kiểm tra kết nối** chạy `/api/health?deep=1` ngay từ origin GitHub Pages.
 
 ## Bảo mật & dữ liệu
-- Mật khẩu: **bcryptjs** (băm một chiều, mặc định 10 vòng, tối đa 72 byte). Repo private nên không mã hoá thêm hồ sơ/bài; riêng **API key AI** (Gemini, vilao.ai, ChatGPT, DeepSeek, OpenRouter) vẫn mã hoá AES-GCM.
+- Mật khẩu: **bcryptjs** (băm một chiều, mặc định 10 vòng, tối đa 72 byte). Repo private nên không mã hoá thêm hồ sơ/bài; riêng **API key AI** vẫn mã hoá AES-GCM. Đăng nhập được bằng **tên đăng nhập hoặc email**.
 - Ảnh: **AES-256-GCM**, khoá HKDF từ `ENCRYPTION_KEY`, AAD = id chủ tài khoản ⇒ người khác không giải mã được dù biết id. Không kiểm duyệt (không Cloudinary); chỉ kiểm tra đúng JPEG/PNG/GIF/WebP.
 - Ảnh tự sinh `…-image`, `…-image-1`, `…-image-2`… (private + gắn webhook). Giới hạn 200MB/repo (`IMAGE_REPO_LIMIT_MB`), chừa dự phòng 8MB (`IMAGE_REPO_RESERVE_MB`) nên thực tế chuyển repo ở ~192MB. Dung lượng theo dõi bằng sổ `images/pool.json` + `repository.size` từ webhook.
 - Webhook `POST /webhooks/github`: xác thực HMAC-SHA256 (`X-Hub-Signature-256`), nhận `ping`/`push`, làm mới cache các file vừa đổi, cập nhật dung lượng repo ảnh. Sai chữ ký → 401.
 - Dọn commit: giữ `PRUNE_DAYS` (5) ngày; gộp phần cũ thành 1 commit gốc, nội dung HEAD **không đổi** (kiểm tra cây trước khi force-update; nhánh có commit mới giữa chừng thì bỏ lượt). Quá `PRUNE_MAX_REPLAY` commit trong 5 ngày thì chỉ giữ số commit mới nhất đó.
-- Bố cục dữ liệu: `…-account`: `users/<tên>.json`, `sessions/<uid>.json`, `private/<uid>/vault.json` · `…-data`: `u/<uid>/{essays,quizzes,submissions}/<id>.json`, `u/<uid>/index.json`, `images/pool.json`.
-- Giới hạn: tên đăng nhập `a-z0-9_.-` (3–32); bài ≤ ~900KB; trắc nghiệm ≤ 300 câu.
+- Bố cục dữ liệu: `…-account`: `users/<tên>.json`, `sessions/<uid>.json`, `private/<uid>/vault.json`, `AI-database/<uid>/index.json` (nhà cung cấp AI của tài khoản, không chứa key) · `…-data`: `u/<uid>/{essays,quizzes,submissions}/<id>.json`, `u/<uid>/index.json`, `images/pool.json`.
+- Giới hạn: tên đăng nhập `a-z0-9_.-` (3–32); bài ≤ ~900KB; trắc nghiệm ≤ 300 câu; tối đa 12 nhà cung cấp AI/tài khoản.
 - Chống dò mật khẩu/spam chỉ ở mức RAM từng instance (serverless không có bộ nhớ chung) — đủ cho dùng cá nhân/nhóm nhỏ.
 
 ## Tính năng
-Tạo/sửa/xoá bài tự luận (đề, đáp án mẫu, tiêu chí từ khoá, ảnh) và trắc nghiệm (nhập nhanh từ văn bản `Câu 1: … A. … Đáp án: B`, nhiều đáp án đúng, giải thích, đếm ngược, xáo câu, ảnh) · làm bài & chấm tự động trắc nghiệm · tự luận: gợi ý điểm theo từ khoá, tự chấm, chấm bằng AI (Gemini / vilao.ai / ChatGPT / DeepSeek / OpenRouter) bằng **key của chính bạn** · trắc nghiệm: **Phân tích AI** (chủ đề hay sai, vì sao sai từng câu, kế hoạch ôn; tối đa 5 lần/bài nộp, giãn cách 30 giây) · lịch sử bài nộp · xuất JSON · dựng lại chỉ mục.
+Tạo/sửa/xoá bài **tự luận** (đề, đáp án mẫu — dán HTML do AI sinh từ ảnh đề bằng prompt mẫu có sẵn, tiêu chí từ khoá, ảnh, đếm giờ) và **trắc nghiệm 3 phần** chuyển nguyên từ bản cũ `luyen-thi-cntt-utc-mnha`: Phần 1 nhiều đáp án, Phần 2 Đúng/Sai theo từng ý (chia đều hoặc THPTQG), Phần 3 điền số liệu (sai số, nhiều cách viết); dán 3 khối text theo quy luật `- câu / +) đáp án / => đáp án / ++) giải thích`, câu hỏi chùm `*)/1-3/`, `//image:`, prompt mẫu nhờ AI tạo đề, audio bài nghe, **xáo trộn thứ tự câu** (câu chùm đi liền nhau), đếm giờ + chuông, đánh dấu câu, nháp tự lưu · tự luận: chấm bằng AI bằng **key của chính bạn** · trắc nghiệm: **Phân tích AI** (chủ đề hay sai, vì sao sai từng câu, kế hoạch ôn; tối đa 5 lần/bài nộp, giãn cách 30 giây) · lịch sử bài nộp · xuất JSON · dựng lại chỉ mục.
 Không có trong bản này (so với bản cũ): MongoDB, admin/duyệt user, slide/video/flashcard/tài liệu, Cloudinary.
 Thanh trên cùng hiện **email đăng nhập** (tài khoản cũ chưa có email thì hiện tên đăng nhập).
 
-## Kết nối AI (Cài đặt → Kết nối AI)
-- Chọn nhà cung cấp + model (danh sách lấy từ bản cũ `luyen-thi-cntt-utc-mnha`: Gemini 3.x/2.5/Gemma, vilao.ai, ChatGPT, DeepSeek, OpenRouter), dán **API key của riêng bạn**, bấm **Kiểm tra kết nối AI**. Mỗi nhà cung cấp giữ một key riêng (mã hoá AES-256-GCM, repo `-account` private); nhà đang chọn là mặc định khi chấm.
-- Ở trang bài nộp tự luận có thể chọn nhà cung cấp/model khác cho riêng lần chấm đó.
-- Địa chỉ API của từng nhà cung cấp do **máy chủ cố định** trong `backend/src/aiModels.js` (người dùng không nhập URL → không bị lợi dụng gửi request tới địa chỉ lạ). Muốn thêm nhà cung cấp kiểu OpenAI khác: thêm một dòng `kind: 'openai'` vào file đó.
+## Nhà cung cấp AI (Cài đặt → tab "Nhà cung cấp AI")
+- Trang riêng, **tự chủ động** như bản cũ: bạn **tự thêm** nhà cung cấp (tên, địa chỉ API, đường dẫn chat, danh sách model, header xác thực…) hoặc bấm mẫu gợi ý (vilao.ai, ChatGPT, DeepSeek, OpenRouter). Google Gemini luôn có sẵn (danh sách model lấy từ bản cũ).
+- Danh sách của **từng tài khoản** lưu ở repo `-account`: `AI-database/<uid>/index.json` (không chứa key). Mỗi nhà giữ một API key riêng (mã hoá AES-256-GCM ở `private/<uid>/vault.json`); xoá nhà cung cấp thì xoá luôn key. Tài khoản cũ đã có key vilao.ai/ChatGPT/… được tự dựng danh sách lần đầu.
+- Ở trang bài nộp có thể chọn nhà cung cấp/model khác cho riêng lần chấm/phân tích đó.
+- Vì địa chỉ API do người dùng nhập: chỉ nhận `https://` tới tên miền công khai, cổng 443; máy chủ phân giải DNS và từ chối IP nội bộ/loopback trước khi gọi, không theo chuyển hướng (chống SSRF, không lộ key).
 - Gemini quá tải (503/timeout) → tự thử tối đa 2 model dự phòng, trong ngân sách ~52 giây (Vercel giới hạn 60 giây/hàm).
 - Lỗi key sai/hết hạn mức trả về mã 400/429 (không bao giờ 401 để khỏi bị đăng xuất nhầm). Giới hạn: 15 lần chấm/phân tích AI và 20 lần thử kết nối mỗi giờ. Kết quả phân tích lưu trong bài nộp (`aiAnalyses`).
 
 ## Kiểm thử
 ```
 cd backend
-npm test            # 45 kịch bản tích hợp với GitHub giả lập (không cần mạng)
-npm run test:e2e    # trình duyệt thật (Playwright): Pages-origin ↔ API-origin khác nhau
-npm run test:ui     # trình duyệt thật: nền trắng, tên mới, hiện/ẩn mật khẩu, Kết nối AI, chấm AI
+npm test            # 48 kịch bản tích hợp với GitHub giả lập (không cần mạng)
+npm run test:ui     # trình duyệt thật (Playwright): đăng nhập bằng email, Cài đặt → Nhà cung cấp AI, tạo/làm đề 3 phần, chấm & phân tích AI
 ```
 Sandbox khi kiểm thử không có mạng nên `bcryptjs` được thay bằng bản giả trong `backend/test/stubs` (cùng API `hash/compare`); **khi chạy thật Vercel cài `bcryptjs` thật** từ `package.json`. Thư mục `test/` không ảnh hưởng khi deploy.

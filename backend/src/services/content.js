@@ -2,12 +2,14 @@
 /** Bài tự luận / trắc nghiệm / bài nộp của TỪNG tài khoản — repo DATA (private, không dọn commit). */
 const { HttpError } = require('../http');
 const { nowIso, isId, mapLimit } = require('../util');
-const { sanitizeEssay, sanitizeQuiz, imageRefs } = require('./validate');
-const { gradeQuiz, suggestEssay } = require('./grading');
+const { sanitizeEssay, sanitizeQuiz, rawTexts, imageRefs } = require('./validate');
+const { suggestEssay } = require('./grading');
+const { grade: gradeParts } = require('./quiz/grade');
+const qcfg = require('./quiz/config');
 const { gradeEssay } = require('./gemini');
 const { callAi } = require('./ai');
 const { analyzeQuiz } = require('./analysis');
-const { providers, getProvider, safeModel, publicList } = require('../aiModels');
+const { PRESETS, MAX_PROVIDERS, geminiProvider, normalizeProviderInput, sanitizeDocument, findProvider, safeModel, publicProvider, publicPresets } = require('../aiModels');
 const { encryptText, decryptText, deriveKey } = require('../crypto');
 
 const TYPES = { essay: 'essays', quiz: 'quizzes' };
@@ -15,12 +17,13 @@ const MAX_SUBS_IN_INDEX = 1000;
 const MAX_ANALYSES = 5;            // số lần phân tích AI tối đa cho mỗi bài nộp trắc nghiệm
 const ANALYSIS_COOLDOWN_MS = 30000; // giãn cách giữa 2 lần phân tích của cùng một bài nộp
 
-function createContent({ cfg, store, images, fetchImpl }) {
+function createContent({ cfg, store, images, fetchImpl, lookup }) {
   const base = (uid) => `u/${uid}`;
   const itemPath = (uid, type, id) => `${base(uid)}/${TYPES[type]}/${id}.json`;
   const subPath = (uid, id) => `${base(uid)}/submissions/${id}.json`;
   const indexPath = (uid) => `${base(uid)}/index.json`;
   const vaultPath = (uid) => `private/${uid}/vault.json`;
+  const aiDocPath = (uid) => `AI-database/${uid}/index.json`;   // nhà cung cấp AI của TỪNG tài khoản (repo ACCOUNT, không chứa key)
   const emptyIndex = () => ({ items: {}, subs: [] });
 
   const mustId = (id) => { if (!isId(id)) throw new HttpError(400, 'id không hợp lệ', 'BAD_ID'); return id; };
@@ -29,7 +32,7 @@ function createContent({ cfg, store, images, fetchImpl }) {
   const summary = (it, prev = {}) => ({
     id: it.id, type: it.type, title: it.title, subject: it.subject, tags: it.tags,
     createdAt: it.createdAt, updatedAt: it.updatedAt,
-    size: it.type === 'quiz' ? it.questions.length : it.maxScore,
+    size: it.type === 'quiz' ? qcfg.PARTS.reduce((n, k) => n + ((it.parts && it.parts[k] && it.parts[k].questions.length) || 0), 0) : it.maxScore,
     attempts: prev.attempts || 0, bestPct: prev.bestPct == null ? null : prev.bestPct, lastAt: prev.lastAt || null,
   });
 
@@ -51,7 +54,7 @@ function createContent({ cfg, store, images, fetchImpl }) {
     mustType(type); mustId(id);
     const r = await store.read('data', itemPath(uid, type, id));
     if (!r) throw new HttpError(404, 'Không tìm thấy bài', 'NOT_FOUND');
-    return r.data;
+    return type === 'quiz' && r.data.parts ? { ...r.data, raw: rawTexts(r.data) } : r.data;   // raw = văn bản 3 khối để sửa lại
   }
 
   async function putItem(uid, type, id, input) {
@@ -88,11 +91,11 @@ function createContent({ cfg, store, images, fetchImpl }) {
       startedAt: input.startedAt || null, durationSec: Math.max(0, Math.min(86400, Number(input.durationSec) || 0)) };
     let pct, scoreLabel;
     if (type === 'quiz') {
-      const g = gradeQuiz(item, input.answers);
-      sub.answers = input.answers && typeof input.answers === 'object' ? input.answers : {};
-      Object.assign(sub, { score: g.score, max: g.max, correctCount: g.correctCount, total: g.total, results: g.results });
-      sub.snapshot = item.questions.map((q) => ({ id: q.id, text: q.text, options: q.options, correct: q.correct, explanation: q.explanation, points: q.points }));
-      pct = g.max ? Math.round((g.score / g.max) * 100) : 0;
+      const answers = sanitizeAnswers(item, input.answers);
+      const result = gradeParts({ maxScore: item.maxScore, parts: item.parts }, answers);
+      sub.answers = answers;
+      Object.assign(sub, { score: result.score, max: result.maxScore, correctCount: result.correctCount, total: result.totalCount, result, snapshot: { maxScore: item.maxScore, parts: item.parts } });
+      pct = result.maxScore ? Math.round((result.score / result.maxScore) * 100) : 0;
     } else {
       const text = String(input.text || '').slice(0, 30000);
       if (!text.trim()) throw new HttpError(400, 'Bài làm đang trống', 'VALIDATION');
@@ -111,6 +114,21 @@ function createContent({ cfg, store, images, fetchImpl }) {
       return idx;
     }, { message: `index ${uid}`, defaultValue: emptyIndex() });
     return sub;
+  }
+
+  /** Chuẩn hoá đáp án gửi lên (chuyển từ bản cũ sanitizeAnswers): mcq = mảng khoá, tf = boolean theo từng ý, fill = chuỗi. */
+  function sanitizeAnswers(quiz, raw) {
+    const src = raw && typeof raw === 'object' ? raw : {}; const out = {};
+    for (const k of qcfg.PARTS) {
+      const p = quiz.parts && quiz.parts[k]; if (!p) continue;
+      for (const q of p.questions) {
+        if (k === 'tf') { for (const st of q.statements || []) if (typeof src[st.id] === 'boolean') out[st.id] = src[st.id]; continue; }
+        const a = src[q.id]; if (a === undefined || a === null) continue;
+        if (k === 'mcq') { const keys = new Set((q.options || []).map((o) => o.key)); const picked = (Array.isArray(a) ? a : [a]).map(String).filter((x) => keys.has(x)); if (picked.length) out[q.id] = [...new Set(picked)].sort(); }
+        else if (typeof a === 'string' && a.trim()) out[q.id] = a.trim().slice(0, 300);
+      }
+    }
+    return out;
   }
 
   const subSummary = (sub, pct) => ({ id: sub.id, type: sub.type, itemId: sub.itemId, title: sub.title, subject: sub.subject, at: sub.submittedAt, score: sub.score, max: sub.max, pct: pct == null ? null : pct });
@@ -155,9 +173,11 @@ function createContent({ cfg, store, images, fetchImpl }) {
 
   /** Chọn nhà cung cấp + model + key để gọi AI (mặc định theo Cài đặt; có thể chọn riêng cho từng lần). */
   async function resolveAi(uid, wanted = {}) {
-    const v = await readVault(uid, true);
-    const p = getProvider(cfg, wanted.provider || v.provider);
-    if (!p) throw new HttpError(400, 'Nhà cung cấp AI không hợp lệ', 'AI_PROVIDER');
+    const list = await userProviders(uid);
+    const v = await readVault(uid, true, list);
+    const p = findProvider(list, wanted.provider || v.provider);
+    if (!p) throw new HttpError(400, 'Nhà cung cấp AI không hợp lệ — hãy thêm nhà cung cấp trong Cài đặt', 'AI_PROVIDER');
+    if (p.enabled === false) throw new HttpError(400, `${p.label} đang tắt trong Cài đặt`, 'AI_PROVIDER');
     const apiKey = v.keys[p.id];
     if (!apiKey) throw new HttpError(400, `Chưa lưu API key ${p.label} trong Cài đặt`, 'NO_AI_KEY');
     const asked = typeof wanted.model === 'string' ? wanted.model.trim() : '';
@@ -169,7 +189,7 @@ function createContent({ cfg, store, images, fetchImpl }) {
   async function testAi(uid, wanted) {
     const { provider, apiKey, model } = await resolveAi(uid, wanted);
     const t0 = Date.now();
-    const r = await callAi({ provider, model, apiKey, prompt: 'Reply only with the word OK.', fetchImpl, timeoutMs: 12000, budgetMs: 40000 });
+    const r = await callAi({ provider, model, apiKey, prompt: 'Reply only with the word OK.', fetchImpl, lookup, timeoutMs: 12000, budgetMs: 40000 });
     return { provider: provider.id, label: provider.label, model: r.model, response: r.text.trim().slice(0, 60), ms: Date.now() - t0, ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}) };
   }
 
@@ -178,7 +198,7 @@ function createContent({ cfg, store, images, fetchImpl }) {
     if (sub.type !== 'essay') throw new HttpError(400, 'Chỉ bài tự luận mới chấm AI', 'BAD_TYPE');
     const { provider, apiKey, model } = await resolveAi(uid, wanted);
     const essay = { prompt: sub.snapshot.prompt, modelAnswer: sub.snapshot.modelAnswer, rubric: sub.snapshot.rubric, maxScore: sub.snapshot.maxScore };
-    const ai = await gradeEssay({ provider, apiKey, model, essay, answer: sub.text, fetchImpl });
+    const ai = await gradeEssay({ provider, apiKey, model, essay, answer: sub.text, fetchImpl, lookup });
     ai.at = nowIso();
     const next = await store.update('data', subPath(uid, id), (s) => { s.ai = ai; if (s.selfScore == null) s.score = ai.score; return s; }, { message: `ai-grade ${id}` });
     if (next.score != null) await patchIndexSub(uid, id, next.score, next.max);
@@ -194,7 +214,7 @@ function createContent({ cfg, store, images, fetchImpl }) {
     const last = list.length ? Date.parse(list[list.length - 1].at) : 0;
     if (last && Date.now() - last < ANALYSIS_COOLDOWN_MS) throw new HttpError(429, `Vui lòng chờ ${Math.ceil((ANALYSIS_COOLDOWN_MS - (Date.now() - last)) / 1000)} giây rồi thử lại`, 'COOLDOWN');
     const { provider, apiKey, model } = await resolveAi(uid, wanted);
-    const out = await analyzeQuiz({ provider, apiKey, model, sub, studentName: wanted.studentName, fetchImpl });
+    const out = await analyzeQuiz({ provider, apiKey, model, sub, studentName: wanted.studentName, fetchImpl, lookup });
     const entry = { id: `an_${Date.now()}`, at: nowIso(), ...out };
     const next = await store.update('data', subPath(uid, id), (s) => {
       const cur = Array.isArray(s.aiAnalyses) ? s.aiAnalyses : [];
@@ -213,18 +233,65 @@ function createContent({ cfg, store, images, fetchImpl }) {
   // ───────── Kho riêng tư (repo ACCOUNT) ─────────
   const vkey = () => deriveKey(cfg.encKey, 'vault');
   const KEY_RE = /^[\x21-\x7e]{8,300}$/;
-  async function readVault(uid, withSecret = false) {
+
+  // ───────── Nhà cung cấp AI của từng tài khoản: AI-database/<uid>/index.json ─────────
+  /** Đọc danh sách (đã chuẩn hoá, luôn có Gemini). Tài khoản cũ chưa có file → dựng từ các key đã lưu rồi ghi file. */
+  async function userProviders(uid) {
+    const r = await store.read('account', aiDocPath(uid));
+    if (r) return sanitizeDocument(r.data, cfg).providers;
+    const v = await store.read('account', vaultPath(uid)); const d = v ? v.data : {};
+    const seeded = { version: 1, updatedAt: nowIso(), providers: [] };
+    for (const pr of PRESETS) if ((d.keys && d.keys[pr.id]) || (d.models && d.models[pr.id])) {
+      const n = normalizeProviderInput(pr); if (n.value) seeded.providers.push(n.value);
+    }
+    try { await store.create('account', aiDocPath(uid), seeded, `ai-database ${uid}`); } catch (e) { if (e.code !== 'EXISTS') throw e; }
+    return sanitizeDocument(seeded, cfg).providers;
+  }
+  const saveAiDoc = (uid, providers) => store.write('account', aiDocPath(uid), { version: 1, updatedAt: nowIso(), providers: providers.filter((p) => !p.builtin) }, `ai-database ${uid}`);
+
+  async function aiProviders(uid) {
+    const list = await userProviders(uid);
+    return { providers: list.map(publicProvider), presets: publicPresets(), max: MAX_PROVIDERS };
+  }
+
+  /** Thêm (id=null) hoặc sửa nhà cung cấp kiểu OpenAI. */
+  async function saveProvider(uid, id, input = {}) {
+    const list = await userProviders(uid);
+    const prev = id ? findProvider(list, id) : null;
+    if (id && !prev) throw new HttpError(404, 'Không tìm thấy nhà cung cấp', 'NOT_FOUND');
+    if (prev && prev.builtin) throw new HttpError(400, 'Google Gemini là nhà cung cấp dựng sẵn, không sửa được', 'AI_PROVIDER');
+    if (!prev && list.length >= MAX_PROVIDERS) throw new HttpError(400, `Tối đa ${MAX_PROVIDERS} nhà cung cấp`, 'LIMIT');
+    const n = normalizeProviderInput(input, prev);
+    if (!n.value) throw new HttpError(400, n.errors[0], 'VALIDATION');
+    if (!prev && findProvider(list, n.value.id)) throw new HttpError(409, `Mã "${n.value.id}" đã tồn tại`, 'EXISTS');
+    const next = prev ? list.map((p) => (p.id === prev.id ? n.value : p)) : list.concat([n.value]);
+    await saveAiDoc(uid, next);
+    return publicProvider(n.value);
+  }
+
+  async function deleteProvider(uid, id) {
+    const list = await userProviders(uid); const prev = findProvider(list, id);
+    if (!prev) throw new HttpError(404, 'Không tìm thấy nhà cung cấp', 'NOT_FOUND');
+    if (prev.builtin) throw new HttpError(400, 'Không xoá được Google Gemini (dựng sẵn)', 'AI_PROVIDER');
+    await saveAiDoc(uid, list.filter((p) => p.id !== prev.id));
+    await store.update('account', vaultPath(uid), (d) => {      // xoá luôn key + model đã lưu cho nhà này
+      if (!d) return undefined; if (d.keys) delete d.keys[prev.id]; if (d.models) delete d.models[prev.id]; if (d.provider === prev.id) d.provider = 'gemini'; return d;
+    }, { message: `vault ${uid}` });
+  }
+
+  async function readVault(uid, withSecret = false, list = null) {
+    list = list || await userProviders(uid);
     const r = await store.read('account', vaultPath(uid));
     const d = r ? r.data : {};
     const items = {}, keys = {};
-    for (const p of providers(cfg)) {
+    for (const p of list) {
       const enc = (d.keys && d.keys[p.id]) || (p.id === 'gemini' ? d.geminiKeyEnc : '');   // d.geminiKeyEnc: dữ liệu bản cũ
       let key = '';
       if (enc) { try { key = decryptText(vkey(), enc, uid); } catch { key = ''; } }
       items[p.id] = { keySet: !!key, model: (d.models && d.models[p.id]) || (p.id === 'gemini' ? d.geminiModel : '') || '' };
       if (key) keys[p.id] = key;
     }
-    const provider = getProvider(cfg, d.provider) ? d.provider : 'gemini';
+    const provider = findProvider(list, d.provider) ? d.provider : 'gemini';
     const out = { provider, items, geminiKeySet: items.gemini.keySet, geminiModel: items.gemini.model, notes: d.notes || '', updatedAt: d.updatedAt || null };
     if (withSecret) out.keys = keys;
     return out;
@@ -232,12 +299,13 @@ function createContent({ cfg, store, images, fetchImpl }) {
 
   /** Nhận { provider, providers: { <id>: { key?, model? } }, notes } — hoặc dạng cũ { geminiKey, geminiModel }. Key rỗng '' = xoá key. */
   async function writeVault(uid, body = {}) {
+    const list = await userProviders(uid);
     const upd = {};
-    for (const [id, v] of Object.entries(body.providers && typeof body.providers === 'object' ? body.providers : {})) upd[id] = v && typeof v === 'object' ? v : {};
+    for (const [id, v] of Object.entries(body.providers && typeof body.providers === 'object' ? body.providers : {})) upd[id] = v && typeof v === 'object' ? { ...v } : {};
     if (body.geminiKey !== undefined) upd.gemini = { ...(upd.gemini || {}), key: body.geminiKey };
     if (body.geminiModel !== undefined) upd.gemini = { ...(upd.gemini || {}), model: body.geminiModel };
     for (const [id, v] of Object.entries(upd)) {
-      const p = getProvider(cfg, id); if (!p) throw new HttpError(400, `Nhà cung cấp AI "${id}" không hợp lệ`, 'AI_PROVIDER');
+      const p = findProvider(list, id); if (!p) throw new HttpError(400, `Nhà cung cấp AI "${id}" chưa được thêm trong Cài đặt`, 'AI_PROVIDER');
       if (v.key) { const k = String(v.key).trim(); if (!KEY_RE.test(k)) throw new HttpError(400, `API key ${p.label} không hợp lệ (8–300 ký tự, không có khoảng trắng)`, 'VALIDATION'); v.key = k; }
       if (v.model !== undefined) {
         const m = String(v.model || '').trim();
@@ -245,7 +313,7 @@ function createContent({ cfg, store, images, fetchImpl }) {
         v.model = m;
       }
     }
-    if (body.provider !== undefined && !getProvider(cfg, body.provider)) throw new HttpError(400, 'Nhà cung cấp AI không hợp lệ', 'AI_PROVIDER');
+    if (body.provider !== undefined && !findProvider(list, body.provider)) throw new HttpError(400, 'Nhà cung cấp AI không hợp lệ', 'AI_PROVIDER');
     await store.update('account', vaultPath(uid), (d) => {
       d = d || {}; d.keys = d.keys || {}; d.models = d.models || {};
       if (d.geminiKeyEnc && !d.keys.gemini) d.keys.gemini = d.geminiKeyEnc;       // chuyển dữ liệu bản cũ
@@ -260,7 +328,7 @@ function createContent({ cfg, store, images, fetchImpl }) {
       d.updatedAt = nowIso();
       return d;
     }, { message: `vault ${uid}`, defaultValue: {} });
-    return readVault(uid);
+    return readVault(uid, false, list);
   }
 
   /** Dựng lại index từ thư mục (khi index mất/hỏng). */
@@ -291,7 +359,7 @@ function createContent({ cfg, store, images, fetchImpl }) {
     return { exportedAt: nowIso(), items: items.filter(Boolean), submissions: subs.filter(Boolean) };
   }
 
-  return { overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders: () => publicList(cfg), reindex, exportAll, imageRefs };
+  return { overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs };
 }
 
 module.exports = { createContent };

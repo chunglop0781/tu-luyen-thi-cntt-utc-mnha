@@ -2,10 +2,11 @@ import { API, session, on, ping, logout } from './api.js';
 import { h, toast, spinner, errorBox, logo } from './ui.js';
 import { loginPage } from './pages/auth.js';
 import { homePage, historyPage } from './pages/home.js';
-import { essayEditor, quizEditor } from './pages/editors.js';
-import { essayPractice, quizPractice } from './pages/practice.js';
+import { essayEditor } from './pages/editors.js';
+import { essayPractice } from './pages/practice.js';
+import { quizEditorPage, quizPracticePage } from './pages/quiz.js';
 import { submissionPage } from './pages/submission.js';
-import { settingsPage } from './pages/settings.js';
+import { settingsPage, aiSettingsPage } from './pages/settings.js';
 
 // Định tuyến bằng #hash → đổi trang / tải lại luôn chạy được trên GitHub Pages (không cần server rewrite).
 const routes = [
@@ -13,12 +14,13 @@ const routes = [
   [/^\/$/, homePage],
   [/^\/history$/, historyPage],
   [/^\/settings$/, settingsPage],
+  [/^\/settings\/ai$/, aiSettingsPage],
   [/^\/essay\/new$/, (c) => essayEditor(c, null)],
   [/^\/essay\/([a-f0-9]+)\/edit$/, (c, m) => essayEditor(c, m[1])],
   [/^\/essay\/([a-f0-9]+)$/, (c, m) => essayPractice(c, m[1])],
-  [/^\/quiz\/new$/, (c) => quizEditor(c, null)],
-  [/^\/quiz\/([a-f0-9]+)\/edit$/, (c, m) => quizEditor(c, m[1])],
-  [/^\/quiz\/([a-f0-9]+)$/, (c, m) => quizPractice(c, m[1])],
+  [/^\/quiz\/new$/, (c) => quizEditorPage(c, null)],
+  [/^\/quiz\/([a-f0-9]+)\/edit$/, (c, m) => quizEditorPage(c, m[1])],
+  [/^\/quiz\/([a-f0-9]+)$/, (c, m) => quizPracticePage(c, m[1])],
   [/^\/submission\/([a-f0-9]+)$/, (c, m) => submissionPage(c, m[1])],
 ];
 
@@ -30,7 +32,7 @@ export const go = (path) => { location.hash = '#' + path; };
 function renderTop() {
   const s = session.get();
   const cur = '#' + (location.hash.replace(/^#/, '').split('?')[0] || '/');
-  const link = (href, text) => h('a', { href, class: cur === href ? 'on' : '' }, text);
+  const link = (href, text) => h('a', { href, class: cur === href || (href === '#/settings' && cur.startsWith('#/settings')) ? 'on' : '' }, text);
   top.hidden = !s;                                  // chưa đăng nhập: trang đăng nhập tự có logo riêng
   top.replaceChildren(
     h('a', { class: 'brand', href: '#/' }, logo(), h('div', null, h('b', null, 'Tự luyện thi của mnha'))),

@@ -15,30 +15,54 @@ const IMG_RE = /\[img:[^\]]*\]/g;
 const data = (label, text) => `<<<${label}\n${String(text == null ? '' : text).replace(/<<<|>>>/g, '').replace(IMG_RE, '[ảnh]')}\n>>>`;
 const clip = (s, n) => String(s == null ? '' : s).replace(IMG_RE, '[ảnh]').slice(0, n);
 
+const PARTS = ['mcq', 'tf', 'fill'];
+const strip = (h) => String(h == null ? '' : h).replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '');
+/** Làm phẳng đề 3 phần thành danh sách câu đánh số "Câu N" liền qua các phần (đúng số người học thấy). */
+function flatten(sub) {
+  const items = Object.fromEntries(((sub.result && sub.result.items) || []).map((it) => [it.id, it]));
+  const out = [];
+  for (const k of PARTS) for (const q of (((sub.snapshot || {}).parts || {})[k] || {}).questions || []) {
+    const sts = k === 'tf' ? (q.statements || []).map((st) => ({ st, it: items[st.id] || { correct: false, studentAnswer: null } })) : null;
+    const it = items[q.id] || { correct: false, studentAnswer: null };
+    out.push({ part: k, q, it, sts, ok: k === 'tf' ? sts.every((x) => x.it.correct) : !!it.correct });
+  }
+  return out;
+}
+const tfWord = (v) => (v === true ? 'Đúng' : v === false ? 'Sai' : '(bỏ trống)');
+
 function buildQuizText(sub) {
-  const byId = Object.fromEntries((sub.results || []).map((r) => [r.id, r]));
   const lines = [];
-  sub.snapshot.forEach((q, i) => {
-    const r = byId[q.id] || { ok: false, chosen: [] };
-    const n = i + 1;
-    if (r.ok) { lines.push(`- [ĐÚNG] Câu ${n}: ${clip(q.text, PREVIEW_LEN)}`); return; }
-    lines.push(`- [SAI] Câu ${n}: ${clip(q.text, 1500)}`);
-    for (const o of q.options) lines.push(`  ${o.id}. ${clip(o.text, 500)}`);
-    lines.push(`  Đáp án đúng: ${q.correct.join(', ')}`);
-    lines.push(`  SV chọn: ${r.chosen && r.chosen.length ? r.chosen.join(', ') : '(bỏ trống)'}`);
-    if (q.explanation) lines.push(`  Giải thích có sẵn: ${clip(q.explanation, 1200)}`);
+  flatten(sub).forEach(({ part, q, it, sts, ok }, i) => {
+    const n = i + 1, tag = { mcq: 'Trắc nghiệm', tf: 'Đúng/Sai', fill: 'Điền đáp án' }[part];
+    if (ok) { lines.push(`- [ĐÚNG] Câu ${n} (${tag}): ${clip(q.text, PREVIEW_LEN)}`); return; }
+    lines.push(`- [SAI] Câu ${n} (${tag}): ${clip(q.text, 1500)}`);
+    if (part === 'mcq') {
+      for (const o of q.options) lines.push(`  ${o.key}. ${clip(o.text, 500)}`);
+      lines.push(`  Đáp án đúng: ${(q.correct || []).join(', ')}`);
+      lines.push(`  SV chọn: ${Array.isArray(it.studentAnswer) && it.studentAnswer.length ? it.studentAnswer.join(', ') : '(bỏ trống)'}`);
+      if (q.explanationHtml) lines.push(`  Giải thích có sẵn: ${clip(strip(q.explanationHtml), 1200)}`);
+    } else if (part === 'tf') {
+      for (const { st, it: si } of sts) {
+        lines.push(`  ${si.correct ? '[đúng]' : '[sai]'} ${clip(st.text, 500)} — đáp án: ${tfWord(st.correct)}; SV chọn: ${tfWord(si.studentAnswer)}`);
+        if (!si.correct && st.explanationHtml) lines.push(`    Giải thích có sẵn: ${clip(strip(st.explanationHtml), 800)}`);
+      }
+    } else {
+      lines.push(`  Đáp án đúng: ${(q.answers || []).join(' | ')}`);
+      lines.push(`  SV điền: ${it.studentAnswer ? clip(it.studentAnswer, 300) : '(bỏ trống)'}`);
+      if (q.explanationHtml) lines.push(`  Giải thích có sẵn: ${clip(strip(q.explanationHtml), 1200)}`);
+    }
   });
   return lines.join('\n');
 }
 
 function buildPrompt(sub, studentName) {
   const pct = sub.max ? Math.round((sub.score / sub.max) * 100) : 0;
-  const wrong = sub.snapshot.length - (sub.correctCount || 0);
+  const all = flatten(sub), wrong = all.filter((x) => !x.ok).length;
   return [
     `Bạn là giảng viên hướng dẫn học tập. Dưới đây là đề trắc nghiệm (kèm đáp án đúng và giải thích sẵn có) và bài làm của sinh viên ${studentName || 'sinh viên'}.`,
     'Nhiệm vụ: phân tích những lỗ hổng kiến thức — chủ đề nào hay sai — để sinh viên biết đường học; và giải thích kỹ lý do sai của từng câu để hiểu, sau này tránh lặp lại.',
     `ĐỀ, ĐÁP ÁN VÀ BÀI LÀM (câu đúng chỉ ghi rút gọn):\n${data('ĐỀ VÀ BÀI LÀM', buildQuizText(sub))}`,
-    `KẾT QUẢ TỔNG HỢP:\nĐiểm: ${sub.score}/${sub.max} (${pct}%). Đúng ${sub.correctCount}/${sub.total} câu, sai ${wrong} câu.`,
+    `KẾT QUẢ TỔNG HỢP:\nĐiểm: ${sub.score}/${sub.max} (${pct}%). Sai ${wrong}/${all.length} câu.`,
     [
       'Quy tắc:',
       '- Chỉ dựa trên dữ liệu ở trên, không bịa câu hỏi hay đáp án. Câu đúng không cần giải thích lỗi.',
@@ -74,13 +98,13 @@ function sanitize(raw, total) {
   return out;
 }
 
-async function analyzeQuiz({ provider, apiKey, model, sub, studentName, fetchImpl = fetch }) {
+async function analyzeQuiz({ provider, apiKey, model, sub, studentName, fetchImpl = fetch, lookup }) {
   const prompt = buildPrompt(sub, studentName);
-  const r = await callAi({ provider, model, apiKey, prompt, json: true, fetchImpl });
+  const r = await callAi({ provider, model, apiKey, prompt, json: true, fetchImpl, lookup });
   const raw = parseJsonLoose(r.text);
-  const result = raw && typeof raw === 'object' ? sanitize(raw, sub.snapshot.length) : null;
+  const result = raw && typeof raw === 'object' ? sanitize(raw, flatten(sub).length) : null;
   if (!result) throw new HttpError(502, `${provider.label} trả về định dạng không đọc được, hãy thử lại hoặc chọn model khác`, 'AI_FORMAT');
   return result && { result, model: r.model, provider: r.provider, ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}) };
 }
 
-module.exports = { analyzeQuiz, buildPrompt, sanitize };
+module.exports = { analyzeQuiz, buildPrompt, sanitize, flatten };

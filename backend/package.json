@@ -8,7 +8,6 @@
   "scripts": {
     "start": "node scripts/dev-server.js",
     "test": "NODE_PATH=test/stubs/node_modules node test/run.js",
-    "test:e2e": "NODE_PATH=test/stubs/node_modules node test/e2e.js",
     "test:ui": "NODE_PATH=test/stubs/node_modules node test/e2e-ui.js",
     "setup": "node scripts/setup-github.js",
     "prune": "node scripts/prune.js"

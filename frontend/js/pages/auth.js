@@ -56,17 +56,17 @@ export function loginPage(ctx) {
 
   function drawMain(note) {
     const reg = mode === 'register';
-    const u = h('input', { placeholder: 'vd: nguyenvana', autocomplete: 'username', required: true, maxlength: 32 });
+    const u = h('input', { placeholder: reg ? 'vd: nguyenvana' : 'Tên đăng nhập hoặc email', autocomplete: 'username', required: true, maxlength: reg ? 32 : 254 });
     const em = h('input', { type: 'email', placeholder: 'ten@gmail.com', autocomplete: 'email', required: true, maxlength: 254 });
     const p = h('input', { type: 'password', placeholder: 'Tối thiểu 8 ký tự', autocomplete: reg ? 'new-password' : 'current-password', required: true });
     const n = h('input', { placeholder: 'vd: Nguyễn Văn A', maxlength: 60 });
     const inv = h('input', { placeholder: 'Chỉ nhập nếu được cấp' });
     const btn = h('button', { class: 'btn primary block', type: 'submit' }, reg ? 'Gửi mã xác minh' : 'Đăng nhập');
     const form = h('form', { class: 'stack' },
-      label('Tên đăng nhập', u, reg ? '(a-z, 0-9, _ . -)' : null), reg ? label('Email', em, '(nhận mã xác minh)') : null,
+      label(reg ? 'Tên đăng nhập' : 'Tên đăng nhập hoặc email', u, reg ? '(a-z, 0-9, _ . -)' : null), reg ? label('Email', em, '(nhận mã xác minh)') : null,
       label('Mật khẩu', withToggle(p)), reg ? label('Tên hiển thị', n, '(tuỳ chọn)') : null, reg ? label('Mã mời', inv, '(nếu có)') : null, btn);
     submit(form, btn, async () => {
-      if (!reg) { await authCall('login', { username: u.value, password: p.value }); toast('Đăng nhập thành công', 'ok'); return ctx.go('/'); }
+      if (!reg) { await authCall('login', { identifier: u.value.trim(), password: p.value }); toast('Đăng nhập thành công', 'ok'); return ctx.go('/'); }
       const body = { username: u.value, email: em.value, password: p.value, displayName: n.value, invite: inv.value || undefined };
       const r = await authPost('register/start', body);
       pending = { body, email: r.email, resendIn: r.resendIn || 60 };

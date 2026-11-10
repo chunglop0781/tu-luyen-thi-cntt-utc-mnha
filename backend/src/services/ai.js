@@ -1,8 +1,10 @@
 'use strict';
 /** Gọi AI bằng khoá của CHÍNH người dùng: Gemini (REST) hoặc API kiểu OpenAI (vilao.ai, ChatGPT, DeepSeek, OpenRouter). */
 const { HttpError } = require('../http');
+const { assertPublicHost } = require('./netguard');
+const { DEFAULT_SYSTEM_PROMPT } = require('../aiModels');
 
-const SYSTEM = 'Bạn là trợ lý AI chấm bài. Làm đúng theo yêu cầu và định dạng đầu ra được nêu trong tin nhắn của người dùng.';
+const SYSTEM = DEFAULT_SYSTEM_PROMPT;
 
 function apiError(status, body, p, raw) {
   const msg = (body && body.error && (body.error.message || (typeof body.error === 'string' && body.error))) || (body && body.message) || String(raw || '').slice(0, 200) || 'không rõ';
@@ -17,7 +19,7 @@ function apiError(status, body, p, raw) {
   return e(502, `${p.label} lỗi (${status}): ${msg}`, 'AI_ERROR');
 }
 
-async function once({ p, model, apiKey, prompt, json, fetchImpl, timeoutMs }) {
+async function once({ p, model, apiKey, prompt, json, fetchImpl, timeoutMs, lookup }) {
   let res, url, init;
   if (p.kind === 'gemini') {
     url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
@@ -25,8 +27,10 @@ async function once({ p, model, apiKey, prompt, json, fetchImpl, timeoutMs }) {
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { ...(json ? { responseMimeType: 'application/json' } : {}), temperature: 0.2 } }) };
   } else {
     url = `${p.baseUrl}${p.chatPath}`;
-    init = { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, redirect: 'error', // không theo chuyển hướng → không lộ key
-      body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }], max_tokens: p.maxTokens || 4096, temperature: 0.2 }) };
+    await assertPublicHost(new URL(url).hostname, lookup);   // địa chỉ do người dùng nhập → không cho trỏ vào mạng nội bộ
+    const scheme = p.authScheme === undefined ? 'Bearer' : p.authScheme;
+    init = { method: 'POST', headers: { 'Content-Type': 'application/json', [p.authHeader || 'Authorization']: scheme ? `${scheme} ${apiKey}` : apiKey }, redirect: 'error', // không theo chuyển hướng → không lộ key
+      body: JSON.stringify({ model, messages: [{ role: 'system', content: p.systemPrompt || SYSTEM }, { role: 'user', content: prompt }], max_tokens: p.maxTokens || 4096, temperature: 0.2 }) };
   }
   try { res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) }); }
   catch (e) {
@@ -44,7 +48,7 @@ async function once({ p, model, apiKey, prompt, json, fetchImpl, timeoutMs }) {
 
 /** → { text, model, provider, fallbackFrom? }. Gemini: model chính quá tải/timeout → thử tối đa 2 model dự phòng.
  *  `budgetMs`: tổng thời gian cho mọi lần thử (Vercel giới hạn 60s/hàm) — hết ngân sách thì không thử tiếp. */
-async function callAi({ provider, model, apiKey, prompt, json = false, fetchImpl = fetch, timeoutMs = 45000, budgetMs = 52000 }) {
+async function callAi({ provider, model, apiKey, prompt, json = false, fetchImpl = fetch, timeoutMs = 45000, budgetMs = 52000, lookup }) {
   const chain = [model];
   if (provider.kind === 'gemini') for (const m of provider.fallbackModels || []) if (!chain.includes(m) && chain.length < 3) chain.push(m);
   const t0 = Date.now(); let last;
@@ -52,7 +56,7 @@ async function callAi({ provider, model, apiKey, prompt, json = false, fetchImpl
     const left = budgetMs - (Date.now() - t0);
     if (i > 0 && left < 8000) break;
     try {
-      const text = await once({ p: provider, model: chain[i], apiKey, prompt, json, fetchImpl, timeoutMs: Math.max(3000, Math.min(i === 0 ? timeoutMs : 20000, left)) });
+      const text = await once({ p: provider, model: chain[i], apiKey, prompt, json, fetchImpl, timeoutMs: Math.max(3000, Math.min(i === 0 ? timeoutMs : 20000, left)), lookup });
       return { text, model: chain[i], provider: provider.id, ...(i > 0 ? { fallbackFrom: model } : {}) };
     } catch (e) { last = e; if (!(provider.kind === 'gemini' && (e.upstream === 503 || e.upstream === 504))) throw e; }
   }

@@ -106,7 +106,7 @@ Cùng một danh sách biến được dùng ở 3 nơi, tuỳ cách bạn chọ
 | `REGISTRATION_OPEN` | `true` | Đặt `false` để đóng đăng ký (đăng ký xong hết người cần rồi đóng lại) |
 | `INVITE_CODE` | (trống) | Đặt một mã nếu muốn ai đăng ký cũng phải nhập mã mời |
 | `PRUNE_DAYS` / `PRUNE_MAX_REPLAY` | `5` / `150` | Dọn commit sau 5 ngày, giữ tối đa 150 commit mới nhất |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Model Gemini mặc định khi chấm tự luận. Mỗi tài khoản tự chọn nhà cung cấp/model và nhập API key riêng trong Cài đặt → Kết nối AI |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Model Gemini mặc định khi chấm tự luận. Mỗi tài khoản tự chọn nhà cung cấp/model và nhập API key riêng trong Cài đặt → Nhà cung cấp AI |
 | `REQUIRE_EMAIL_OTP` | `true` | `true`: đăng ký phải nhập mã OTP gửi về email. `false`: tắt OTP, đăng ký thẳng bằng tên + mật khẩu (không cần `MAIL_*`) |
 | `MAIL_HOST` / `MAIL_PORT` / `MAIL_SECURE` | `smtp.gmail.com` / `465` / `true` | Chỉ đổi khi dùng nhà cung cấp mail khác (Brevo, SendGrid, Mailgun…) |
 | `MAIL_FROM` | (trống) | Tên hiển thị ở người gửi, ví dụ `"Tự luyện thi" <ten.ban@gmail.com>`. Trống = tự lấy từ `MAIL_USER` |
@@ -245,7 +245,7 @@ Trang dùng đường dẫn dạng `#/...` (ví dụ `.../tu-luyen-thi-cntt-utc-
 
 1. Mở trang Pages → **Đăng ký** → tạo bài tự luận / trắc nghiệm → làm bài → xem lịch sử.
 2. **Cài đặt → 🩺 Kiểm tra kết nối** → phải ra `"ok": true`.
-3. (Tuỳ chọn) Trong **Cài đặt**, vào **Kết nối AI**, chọn nhà cung cấp (Gemini, vilao.ai, ChatGPT, DeepSeek, OpenRouter) + model, dán API key của bạn rồi bấm **Kiểm tra kết nối AI** để dùng chấm tự luận bằng AI.
+3. (Tuỳ chọn) Trong **Cài đặt**, vào tab **Nhà cung cấp AI**, thêm nhà cung cấp (Gemini có sẵn; vilao.ai, ChatGPT, DeepSeek, OpenRouter bấm mẫu gợi ý hoặc tự nhập) + model, dán API key của bạn rồi bấm **Kiểm tra kết nối AI** để dùng chấm tự luận bằng AI.
 4. Kiểm tra dữ liệu: repo `…-account` có `users/<tên>.json` (mật khẩu là chuỗi băm bcrypt), repo `…-data` có `u/<id>/…`.
 
 ### E. Dọn commit repo `-account` sau 5 ngày

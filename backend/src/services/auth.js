@@ -164,11 +164,18 @@ function createAuth({ cfg, store, mailer }) {
     await revoke(u.id, null);
   }
 
-  async function login({ username, password }, ua) {
-    const key = String(username || '').trim().toLowerCase();
+  /** Đăng nhập bằng TÊN ĐĂNG NHẬP hoặc EMAIL (body.identifier; vẫn nhận body.username cho bản cũ). */
+  async function login(body, ua) {
+    const raw = String((body && (body.identifier !== undefined ? body.identifier : body.username)) || '').trim().toLowerCase();
+    const password = body && body.password;
+    let key = raw;
+    if (raw.includes('@')) {                                  // email → tra chỉ mục emails/<hash>.json ra tên đăng nhập
+      const idx = EMAIL_RE.test(raw) && raw.length <= 254 ? await store.read('account', emailPath(raw), { fresh: true }) : null;
+      key = idx ? idx.data.username : '';
+    }
     const rec = USERNAME_RE.test(key) ? await store.read('account', userPath(key), { fresh: true }) : null;
     const ok = await bcrypt.compare(String(password || ''), rec ? rec.data.hash : dummyHash);
-    if (!rec || !ok) throw new HttpError(401, 'Sai tên đăng nhập hoặc mật khẩu', 'BAD_CREDENTIALS');
+    if (!rec || !ok) throw new HttpError(401, 'Sai tên đăng nhập/email hoặc mật khẩu', 'BAD_CREDENTIALS');
     return issue(rec.data, ua);
   }
 

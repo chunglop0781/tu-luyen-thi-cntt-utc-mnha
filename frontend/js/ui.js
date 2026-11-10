@@ -95,3 +95,27 @@ export function withToggle(input) {
   });
   return h('div', { class: 'pw' }, input, btn);
 }
+
+const OK_TAGS = new Set(['B', 'I', 'U', 'STRONG', 'EM', 'BR', 'P', 'UL', 'OL', 'LI', 'CODE', 'PRE', 'SUB', 'SUP', 'SPAN', 'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TH', 'TD', 'CAPTION', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'DIV', 'BLOCKQUOTE', 'HR', 'FIGURE', 'FIGCAPTION']);
+/** Hiển thị HTML ngắn (giải thích, nội dung chùm) qua danh sách thẻ cho phép — không thuộc tính, không script. */
+export function safeHtml(html) {
+  const box = document.createElement('div');
+  const doc = new DOMParser().parseFromString(`<body>${String(html || '')}</body>`, 'text/html');
+  const walk = (src, dst) => {
+    for (const n of src.childNodes) {
+      if (n.nodeType === 3) dst.append(n.textContent);
+      else if (n.nodeType === 1) { if (OK_TAGS.has(n.tagName)) { const e = document.createElement(n.tagName.toLowerCase()); walk(n, e); dst.append(e); } else walk(n, dst); }
+    }
+  };
+  walk(doc.body, box);
+  return box;
+}
+
+/** Đề / lời giải do AI sinh ra thường là HTML ("nhúng html") → hiển thị qua safeHtml; còn văn bản thường (kèm [img:…]) → rich. */
+export function richOrHtml(text) {
+  const t = String(text || '');
+  if (!/<(p|div|h[1-6]|ul|ol|table|br|b|i|strong|em|span|li)\b[^>]*>/i.test(t)) return rich(t);
+  const box = h('div', { class: 'rich html' }); box.append(...safeHtml(t).childNodes);
+  if (window.MathJax && window.MathJax.typesetPromise) setTimeout(() => window.MathJax.typesetPromise([box]).catch(() => {}), 0);
+  return box;
+}

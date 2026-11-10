@@ -1,0 +1,128 @@
+/* quiz-form.css — trang admin tạo/sửa bài trắc nghiệm. Mọi selector nằm trong .qf */
+.qf { max-width: 1100px; margin: 24px auto 90px; padding: 0 16px; font-family: "Segoe UI", Arial, sans-serif; color: #222; }
+.qf *, .qf *::before, .qf *::after { box-sizing: border-box; }
+.qf [hidden] { display: none !important; }
+
+.qf-top h1 { margin: 6px 0 4px; font-size: 26px; color: #a61c2f; font-weight: 800; }
+.qf-top p { margin: 0 0 16px; color: #6f6f6f; font-size: 14px; }
+.qf-back { color: #6f6f6f; font-size: 14px; text-decoration: none; }
+.qf-back:hover { color: #222; }
+
+.qf-alert { margin-bottom: 14px; padding: 12px 15px; border-radius: 8px; font-size: 14px; line-height: 1.5; }
+.qf-alert.warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.qf-alert.err  { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+.qf-alert.ok   { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+.qf-alert ul { margin: 6px 0 0; padding-left: 20px; }
+
+.qf-card { margin-bottom: 18px; padding: 20px 22px; background: #fff; border: 1px solid #e3e3e3; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .05); }
+.qf-card h2 { margin: 0 0 14px; font-size: 18px; color: #333; }
+
+.qf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.qf-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 4px; }
+.qf-field label { font-size: 13px; font-weight: 700; color: #444; }
+.qf-field small { color: #8a8a8a; font-size: 12px; }
+.qf input[type="text"], .qf input[type="url"], .qf input[type="number"], .qf select, .qf textarea {
+    width: 100%; padding: 9px 11px; border: 1px solid #d3d7de; border-radius: 7px; background: #fff;
+    font: inherit; font-size: 14px; color: #222; outline: none;
+}
+.qf input:focus, .qf select:focus, .qf textarea:focus { border-color: #a61c2f; box-shadow: 0 0 0 3px rgba(166, 28, 47, .08); }
+.qf select:disabled, .qf input:disabled { background: #f3f4f6; cursor: not-allowed; }
+.qf textarea { resize: vertical; line-height: 1.5; }
+
+.qf-checks { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.qf-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.qf-check input { width: auto; }
+
+.qf-btn { padding: 9px 15px; border: 1px solid #cfd5de; border-radius: 7px; background: #f3f4f6; color: #334155; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.qf-btn:hover { background: #e5e7eb; }
+.qf-btn:disabled { opacity: .5; cursor: not-allowed; }
+.qf-btn.primary { border-color: #a61c2f; background: #a61c2f; color: #fff; }
+.qf-btn.primary:hover { background: #861426; }
+.qf-btn.big { padding: 12px 24px; font-size: 15px; }
+.qf-msg { color: #6f6f6f; font-size: 13px; font-weight: 600; }
+.qf-msg.good { color: #16834b; }
+.qf-msg.bad { color: #dc2626; }
+
+/* prompt mẫu */
+.qf-steps { margin: 0 0 14px; padding-left: 20px; font-size: 14px; line-height: 1.7; color: #444; }
+.qf-steps code { padding: 1px 5px; border-radius: 4px; background: #f1f5f9; font-size: 13px; }
+.qf-promptbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.qf-prompt { margin: 12px 0 0; padding: 14px; max-height: 420px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; font: 12.5px/1.55 Consolas, "Courier New", monospace; white-space: pre-wrap; word-break: break-word; }
+
+/* 3 phần */
+.qf-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px dashed #dcdfe5; }
+.qf-part { margin-bottom: 22px; padding: 16px; border: 1px solid #e3e6ec; border-radius: 9px; background: #fbfcfe; }
+.qf-parthead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.qf-parthead h3 { margin: 0; font-size: 16px; color: #1c4385; }
+.qf-count { padding: 3px 10px; border-radius: 12px; background: #e6f0fc; color: #1c4385; font-size: 12px; font-weight: 800; }
+.qf-hint { margin: 6px 0 12px; color: #7b8592; font-size: 12.5px; }
+.qf-partcfg { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.qf-partcfg label { display: flex; flex-direction: column; gap: 4px; min-width: 130px; font-size: 12px; font-weight: 700; color: #555; }
+.qf-partcfg label.qf-wide { flex: 1 1 320px; }
+.qf-paste { font: 13px/1.5 Consolas, "Courier New", monospace !important; background: #fff; }
+.qf-cards { display: flex; flex-direction: column; gap: 12px; margin: 14px 0; }
+
+/* thẻ câu hỏi */
+.qc { padding: 14px 16px; border: 1px solid #dbe1ea; border-left: 4px solid #2c71c2; border-radius: 8px; background: #fff; }
+.qc.qc-bad { border-left-color: #dc2626; background: #fffafa; }
+.qc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.qc-head b { color: #1c4385; font-size: 14px; }
+.qc-tools { display: inline-flex; gap: 6px; }
+.qc-tools button { width: 30px; height: 28px; border: 1px solid #d3d7de; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
+.qc-tools button:hover:not(:disabled) { background: #f1f5f9; }
+.qc-tools button:disabled { opacity: .35; cursor: default; }
+.qc-tools button[data-act="del"]:hover { background: #fee2e2; border-color: #fca5a5; }
+.qc-l { display: block; margin: 10px 0 4px; font-size: 12px; font-weight: 700; color: #555; }
+.qc-err { margin-top: 10px; color: #dc2626; font-size: 12.5px; font-weight: 700; }
+.qc-err:empty { display: none; }
+
+.qc-img { margin-top: 10px; padding: 10px; border: 1px dashed #c8d1dc; border-radius: 7px; background: #f8fafc; }
+.qc-imgrow { display: flex; gap: 8px; }
+.qc-imgrow input { flex: 1; }
+.qc-imgwarn { margin-top: 5px; color: #b45309; font-size: 12px; font-weight: 600; }
+.qc-imgwarn:empty { display: none; }
+.qc-imgprev { display: block; max-width: 100%; max-height: 260px; margin-top: 8px; border: 1px solid #d3d7de; border-radius: 6px; background: #fff; }
+.qc-imgprev[hidden] { display: none; }
+.qf-btn.danger-s { padding: 7px 12px; border-color: #fca5a5; background: #fef2f2; color: #b91c1c; white-space: nowrap; }
+.qf-btn.danger-s:hover { background: #fee2e2; }
+.qf-btn.small { padding: 6px 11px; font-size: 12px; }
+
+.qc-opts, .qc-ans { display: flex; flex-direction: column; gap: 7px; }
+.qc-opt { display: flex; align-items: center; gap: 9px; padding: 6px 9px; border: 1px solid #e0e4ea; border-radius: 7px; background: #fff; }
+.qc-opt.ok { border-color: #63bb84; background: #edfaf2; }
+.qc-opt input[type="checkbox"], .qc-opt input[type="radio"] { width: 18px; height: 18px; flex: 0 0 auto; accent-color: #20a85a; cursor: pointer; }
+.qc-opt .ltr { flex: 0 0 26px; text-align: center; font-weight: 800; color: #586678; }
+.qc-opt input[type="text"] { flex: 1; border-color: transparent; background: transparent; padding: 6px 8px; }
+.qc-opt input[type="text"]:focus { background: #fff; }
+.qc-opt button { width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: #9a3412; cursor: pointer; }
+.qc-opt button:hover { background: #fee2e2; }
+.qc-tf { display: flex; gap: 10px; }
+.qc-tf label { flex: 1; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid #e0e4ea; border-radius: 7px; font-weight: 700; cursor: pointer; }
+.qc-tf label.ok { border-color: #63bb84; background: #edfaf2; color: #166534; }
+.qc-tf input { width: 18px; height: 18px; accent-color: #20a85a; }
+.qc-note { margin-top: 6px; color: #8a8a8a; font-size: 12px; }
+
+.qf-save { position: sticky; bottom: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 10px; padding: 12px 18px; border: 1px solid #e3e3e3; border-radius: 10px; background: rgba(255, 255, 255, .96); box-shadow: 0 -6px 20px rgba(0, 0, 0, .08); backdrop-filter: blur(4px); }
+
+@media (max-width: 640px) {
+    .qf-save { flex-direction: column; align-items: stretch; }
+    .qc-imgrow { flex-direction: column; }
+    .qc-tf { flex-direction: column; }
+}
+
+/* ★ Up ảnh câu hỏi + chọn Cloudinary + câu cần ảnh (//image) */
+.qc-uprow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.qc-upbtn { padding: 7px 12px; }
+.qc-upstatus { font-size: 12px; font-weight: 600; color: #475569; }
+.qc-upstatus:empty { display: none; }
+.qc-upstatus.busy { color: #1c4385; }
+.qc-upstatus.err { color: #b91c1c; }
+.qc-needimg { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 11px; font-weight: 700; }
+.qc-cldlabel { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #1e3a8a; }
+.qc-cld { max-width: 200px; padding: 6px 8px; border: 1px solid #cfd5de; border-radius: 7px; background: #fff; font: inherit; font-size: 12.5px; font-family: ui-monospace, Consolas, monospace; }
+.qc-cld:disabled { opacity: .6; }
+
+/* ★ Xem trước công thức MathJax (chỉ hiện khi ô có công thức hoặc ký hiệu xuống dòng "\n") */
+.qc-math { margin: 4px 0 10px; padding: 8px 12px; border: 1px dashed #94a3b8; border-radius: 8px; background: #f8fafc; color: #0f172a; font-size: 15px; line-height: 1.7; white-space: pre-line; overflow-x: auto; }
+.qc-math::before { content: "Xem trước"; display: block; margin-bottom: 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #64748b; }
+.qc-math mjx-container[display="true"] { margin: .5em 0 !important; overflow-x: auto; overflow-y: hidden; max-width: 100%; }

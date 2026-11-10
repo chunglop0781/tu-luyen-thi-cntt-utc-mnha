@@ -1,8 +1,8 @@
-import { get, put, post, patch, session, API, logout } from '../api.js';
+import { get, put, post, patch, del, session, API, logout } from '../api.js';
 import { h, action, toast, fmtDate, confirmBox, withToggle } from '../ui.js';
 
 export async function settingsPage(ctx) {
-  const [{ vault }, { sessions }, { providers }] = await Promise.all([get('/api/me/vault'), get('/api/me/sessions'), get('/api/ai/providers')]);
+  const { sessions } = await get('/api/me/sessions');
   const s = session.get();
 
   const name = h('input', { value: s.user.displayName, maxlength: 60 });
@@ -13,8 +13,6 @@ export async function settingsPage(ctx) {
   const newPw = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Mật khẩu mới (≥ 8 ký tự)' });
   const pwBtn = h('button', { class: 'btn primary' }, 'Đổi mật khẩu');
   pwBtn.addEventListener('click', action(pwBtn, async () => { await post('/api/auth/change-password', { oldPassword: oldPw.value, newPassword: newPw.value }); oldPw.value = newPw.value = ''; toast('Đã đổi mật khẩu; các thiết bị khác bị đăng xuất', 'ok'); }));
-
-  const aiBox = aiCard(vault, providers);
 
   const exp = h('button', { class: 'btn' }, '⬇️ Tải toàn bộ dữ liệu (JSON)');
   exp.addEventListener('click', action(exp, async () => {
@@ -32,79 +30,135 @@ export async function settingsPage(ctx) {
     diag.textContent = JSON.stringify({ api: API, pages_origin: location.origin, ms: Math.round(performance.now() - t0), ...j }, null, 2);
   }));
 
-  return h('div', { class: 'stack' }, h('h2', null, 'Cài đặt'),
+  return h('div', { class: 'stack' }, h('h2', null, 'Cài đặt'), tabs('account'),
     h('div', { class: 'card stack' }, h('h3', null, 'Hồ sơ'), h('p', { class: 'muted' }, `Tên đăng nhập: ${s.user.username}`), h('div', { class: 'row' }, name, nameBtn)),
     h('div', { class: 'card stack' }, h('h3', null, 'Đổi mật khẩu'), withToggle(oldPw), withToggle(newPw), pwBtn),
-    aiBox,
     h('div', { class: 'card stack' }, h('h3', null, `Phiên đăng nhập (${sessions.length})`), ...sessions.map((x) => h('p', { class: 'muted' }, `${x.current ? '● Thiết bị này · ' : ''}${fmtDate(x.createdAt)} · ${x.ua.slice(0, 60)}`)), all),
     h('div', { class: 'card stack' }, h('h3', null, 'Dữ liệu'), h('div', { class: 'row' }, exp, reidx)),
     h('div', { class: 'card stack' }, h('h3', null, 'Kết nối'), h('p', { class: 'muted' }, `Backend: ${API}`), diagBtn, diag));
 }
 
-/** Kết nối AI: chọn nhà cung cấp + model, dán key của riêng bạn (lưu mã hoá AES-GCM trong repo account private), thử kết nối. */
-function aiCard(vault, providers) {
-  let cur = providers.some((p) => p.id === vault.provider) ? vault.provider : providers[0].id;
-  let items = vault.items;
-  const box = h('div', { class: 'card stack' });
-  const result = h('div');
-  const notes = h('textarea', { rows: 3, placeholder: 'Ghi chú riêng tư (chỉ bạn thấy)' }); notes.value = vault.notes || '';
-  const msg = (kind, text) => h('div', { class: `alert ${kind}`, role: kind === 'err' ? 'alert' : 'status' }, text);
-  let modelEl, key;
+function tabs(cur) {
+  return h('div', { class: 'tabs', role: 'tablist' },
+    h('a', { href: '#/settings', class: cur === 'account' ? 'on' : '', role: 'tab' }, '👤 Tài khoản & dữ liệu'),
+    h('a', { href: '#/settings/ai', class: cur === 'ai' ? 'on' : '', role: 'tab' }, '🤖 Nhà cung cấp AI'));
+}
 
-  async function save(extra = {}) {
-    const m = (modelEl.value || '').trim();
-    const body = { provider: cur, providers: { [cur]: { model: m } }, notes: notes.value, ...extra };
-    if (key.value.trim()) body.providers[cur].key = key.value.trim();
-    const r = await put('/api/me/vault', body);
-    items = r.vault.items; key.value = '';
-    return r.vault;
-  }
+const msg = (kind, text) => h('div', { class: `alert ${kind}`, role: kind === 'err' ? 'alert' : 'status' }, text);
+const field = (label, input, hint) => h('label', { class: 'field' }, h('span', { class: 'lbl' }, label, hint ? h('small', null, ' ', hint) : null), input);
 
-  function draw() {
-    const p = providers.find((x) => x.id === cur);
-    const it = items[p.id] || { keySet: false, model: '' };
-    const provSel = h('select', { 'aria-label': 'Nhà cung cấp AI' }, ...providers.map((x) => h('option', { value: x.id, selected: x.id === cur }, x.label + (items[x.id] && items[x.id].keySet ? '  ✓ đã có key' : ''))));
-    provSel.addEventListener('change', () => { cur = provSel.value; result.replaceChildren(); draw(); });
+/**
+ * Trang riêng "Nhà cung cấp AI" (tự chủ động như bản cũ luyen-thi-cntt-utc-mnha): người dùng TỰ THÊM nhà cung cấp
+ * (tên, địa chỉ API, đường dẫn chat, model…), rồi dán API key riêng cho từng nhà. Danh sách lưu theo tài khoản ở
+ * AI-database/<uid>/index.json (không chứa key); key mã hoá AES-GCM ở kho riêng tư.
+ */
+export async function aiSettingsPage() {
+  const [{ providers: initial, presets, max }, { vault: v0 }] = await Promise.all([get('/api/ai/providers'), get('/api/me/vault')]);
+  let providers = initial, vault = v0;
+  const root = h('div', { class: 'stack' });
 
-    let extra = null;
+  const reload = async () => { const [a, b] = await Promise.all([get('/api/ai/providers'), get('/api/me/vault')]); providers = a.providers; vault = b.vault; draw(); };
+
+  function providerCard(p) {
+    const it = vault.items[p.id] || { keySet: false, model: '' };
+    const isDefault = vault.provider === p.id;
+    const result = h('div');
+    const key = h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: it.keySet ? '•••••• (đã lưu — nhập để thay)' : `API key ${p.label}${p.keyPlaceholder ? ` (${p.keyPlaceholder})` : ''}` });
+    let modelEl, extra = null;
     if (p.allowCustomModel) {
-      modelEl = h('input', { list: 'ai-models', value: it.model, placeholder: `Mặc định: ${p.defaultModel}`, maxlength: 100, autocomplete: 'off', 'aria-label': 'Model' });
-      extra = h('datalist', { id: 'ai-models' }, ...p.models.map((m) => h('option', { value: m })));
+      modelEl = h('input', { list: `models-${p.id}`, value: it.model, placeholder: `Mặc định: ${p.defaultModel}`, maxlength: 100, autocomplete: 'off', 'aria-label': 'Model' });
+      extra = h('datalist', { id: `models-${p.id}` }, ...p.models.map((m) => h('option', { value: m })));
     } else {
       modelEl = h('select', { 'aria-label': 'Model' }, h('option', { value: '', selected: !it.model }, `Mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === it.model }, m)));
     }
-    key = h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: it.keySet ? '•••••• (đã lưu — nhập để thay)' : `API key ${p.label} (${p.keyPlaceholder})` });
-
-    const saveBtn = h('button', { class: 'btn primary' }, 'Lưu');
-    saveBtn.addEventListener('click', action(saveBtn, async () => { await save(); toast('Đã lưu (key được mã hoá)', 'ok'); draw(); }));
-    const testBtn = h('button', { class: 'btn' }, '🔌 Kiểm tra kết nối AI');
+    const save = async (setDefault) => {
+      const body = { providers: { [p.id]: { model: (modelEl.value || '').trim() } } };
+      if (key.value.trim()) body.providers[p.id].key = key.value.trim();
+      if (setDefault) body.provider = p.id;
+      await put('/api/me/vault', body); key.value = '';
+    };
+    const saveBtn = h('button', { class: 'btn primary' }, 'Lưu key & model');
+    saveBtn.addEventListener('click', action(saveBtn, async () => { await save(false); toast('Đã lưu (key được mã hoá)', 'ok'); await reload(); }));
+    const defBtn = h('button', { class: 'btn' }, isDefault ? '★ Đang là mặc định' : '☆ Đặt làm mặc định');
+    defBtn.addEventListener('click', action(defBtn, async () => { if (isDefault) return; await save(true); toast(`${p.label} là nhà mặc định khi chấm/phân tích`, 'ok'); await reload(); }));
+    const testBtn = h('button', { class: 'btn' }, '🔌 Kiểm tra kết nối');
     testBtn.addEventListener('click', action(testBtn, async () => {
-      result.replaceChildren();
-      await save();
+      result.replaceChildren(); await save(false);
       let out;
       try {
-        const r = (await post('/api/ai/test', { provider: cur, model: (modelEl.value || '').trim() || undefined }, { timeout: 60000 })).result;
-        out = msg('ok', `✅ Kết nối được ${r.label} · model ${r.model} · ${r.ms}ms · AI trả lời: "${r.response}"${r.fallbackFrom ? ` (model ${r.fallbackFrom} đang quá tải nên tự chuyển sang ${r.model})` : ''}`);
+        const r = (await post('/api/ai/test', { provider: p.id, model: (modelEl.value || '').trim() || undefined }, { timeout: 60000 })).result;
+        out = msg('ok', `✅ Kết nối được ${r.label} · model ${r.model} · ${r.ms}ms · AI trả lời: "${r.response}"${r.fallbackFrom ? ` (model ${r.fallbackFrom} quá tải nên tự chuyển sang ${r.model})` : ''}`);
       } catch (e) { out = msg('err', `❌ ${e.message}`); }
-      draw(); result.replaceChildren(out);
+      result.replaceChildren(out);
     }));
     const rmKey = h('button', { class: 'btn ghost danger' }, 'Xoá key');
-    rmKey.addEventListener('click', action(rmKey, async () => {
-      if (!(await confirmBox(`Xoá key ${p.label} đã lưu?`))) return;
-      const r = await put('/api/me/vault', { providers: { [cur]: { key: '' } } }); items = r.vault.items; toast('Đã xoá key', 'ok'); result.replaceChildren(); draw();
-    }));
+    rmKey.addEventListener('click', action(rmKey, async () => { if (!(await confirmBox(`Xoá key ${p.label} đã lưu?`))) return; await put('/api/me/vault', { providers: { [p.id]: { key: '' } } }); toast('Đã xoá key', 'ok'); await reload(); }));
+    const editBtn = p.builtin ? null : h('button', { class: 'btn ghost' }, '✏️ Sửa nhà cung cấp');
+    if (editBtn) editBtn.addEventListener('click', () => { card.replaceWith(providerForm(p)); });
+    const delBtn = p.builtin ? null : h('button', { class: 'btn ghost danger' }, '🗑 Xoá nhà cung cấp');
+    if (delBtn) delBtn.addEventListener('click', action(delBtn, async () => { if (!(await confirmBox(`Xoá nhà cung cấp "${p.label}" cùng key đã lưu?`))) return; await del(`/api/ai/providers/${p.id}`); toast('Đã xoá', 'ok'); await reload(); }));
 
-    box.replaceChildren(
-      h('h3', null, 'Kết nối AI (chấm tự luận)'),
-      h('p', { class: 'muted' }, 'Chọn nhà cung cấp, model và dán API key của riêng bạn. Key lưu mã hoá trong repo account (private); mỗi nhà cung cấp giữ key riêng, nhà đang chọn là nhà mặc định khi chấm.'),
-      h('div', { class: 'ai-grid' },
-        h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Nhà cung cấp'), provSel),
-        h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Model', h('small', null, p.allowCustomModel ? ' (chọn gợi ý hoặc tự gõ)' : '')), modelEl, extra)),
-      h('label', { class: 'field' }, h('span', { class: 'lbl' }, `API key ${p.label}`), withToggle(key)),
-      notes,
-      h('div', { class: 'row' }, saveBtn, testBtn, it.keySet ? rmKey : null),
-      result);
+    const card = h('div', { class: 'card stack prov' },
+      h('div', { class: 'row between' },
+        h('h3', null, p.label, ' ', h('span', { class: 'badge' }, p.builtin ? 'dựng sẵn' : p.id), isDefault ? h('span', { class: 'badge quiz' }, 'mặc định') : null, it.keySet ? h('span', { class: 'badge good-b' }, '✓ có key') : h('span', { class: 'badge' }, 'chưa có key')),
+        h('div', { class: 'row' }, editBtn, delBtn)),
+      p.baseUrl ? h('p', { class: 'muted' }, h('code', null, p.baseUrl + p.chatPath)) : h('p', { class: 'muted' }, 'API Google Gemini (generateContent)'),
+      h('div', { class: 'ai-grid' }, field('Model', modelEl, p.allowCustomModel ? '(chọn gợi ý hoặc tự gõ)' : ''), field(`API key ${p.label}`, withToggle(key))), extra,
+      h('div', { class: 'row' }, saveBtn, testBtn, defBtn, it.keySet ? rmKey : null), result);
+    return card;
+  }
+
+  /** Form thêm/sửa nhà cung cấp kiểu OpenAI (người dùng tự điền; có thể bấm mẫu gợi ý). */
+  function providerForm(prev, preset) {
+    const base = prev || preset || {};
+    const f = {
+      id: h('input', { value: prev ? prev.id : (base.id || ''), placeholder: 'vd: openai, deepseek', maxlength: 32, disabled: !!prev, autocomplete: 'off' }),
+      label: h('input', { value: base.label || '', placeholder: 'Tên hiển thị, vd: ChatGPT (OpenAI)', maxlength: 60 }),
+      baseUrl: h('input', { value: base.baseUrl || '', placeholder: 'https://api.openai.com', autocomplete: 'off' }),
+      chatPath: h('input', { value: base.chatPath || '/v1/chat/completions', placeholder: '/v1/chat/completions' }),
+      models: h('textarea', { rows: 3, placeholder: 'Mỗi dòng (hoặc cách nhau dấu phẩy) một model' }),
+      defaultModel: h('input', { value: base.defaultModel || '', placeholder: 'Model mặc định (để trống = model đầu tiên)', maxlength: 100 }),
+      authHeader: h('input', { value: prev ? prev.authHeader : 'Authorization', placeholder: 'Authorization' }),
+      authScheme: h('input', { value: prev ? prev.authScheme : 'Bearer', placeholder: 'Bearer (để trống = gửi key trần)' }),
+      maxTokens: h('input', { type: 'number', min: 1, max: 200000, value: prev ? prev.maxTokens : 4096 }),
+      keyPlaceholder: h('input', { value: base.keyPlaceholder || '', placeholder: 'Gợi ý ô key, vd: sk-…', maxlength: 40 }),
+      subscribeRegex: h('input', { value: base.subscribeRegex || '', placeholder: 'Tuỳ chọn: regex nhận lỗi "chưa đăng ký model"' }),
+    };
+    f.models.value = (base.models || []).join('\n');
+    const custom = h('input', { type: 'checkbox', checked: prev ? prev.allowCustomModel : true });
+    const err = h('div');
+    const saveBtn = h('button', { class: 'btn primary' }, prev ? 'Lưu thay đổi' : 'Thêm nhà cung cấp');
+    saveBtn.addEventListener('click', action(saveBtn, async () => {
+      err.replaceChildren();
+      const body = { id: f.id.value.trim().toLowerCase(), label: f.label.value, baseUrl: f.baseUrl.value, chatPath: f.chatPath.value, models: f.models.value, defaultModel: f.defaultModel.value, authHeader: f.authHeader.value, authScheme: f.authScheme.value, maxTokens: Number(f.maxTokens.value), keyPlaceholder: f.keyPlaceholder.value, subscribeRegex: f.subscribeRegex.value, allowCustomModel: custom.checked };
+      try { if (prev) await put(`/api/ai/providers/${prev.id}`, body); else await post('/api/ai/providers', body); }
+      catch (e) { err.replaceChildren(msg('err', e.message)); return; }
+      toast(prev ? 'Đã lưu nhà cung cấp' : 'Đã thêm nhà cung cấp — hãy dán API key bên dưới', 'ok'); await reload();
+    }));
+    const cancel = h('button', { class: 'btn ghost', type: 'button' }, 'Huỷ'); cancel.addEventListener('click', () => draw());
+    return h('div', { class: 'card stack prov-form' }, h('h3', null, prev ? `Sửa: ${prev.label}` : 'Thêm nhà cung cấp AI (API kiểu OpenAI)'),
+      h('p', { class: 'muted' }, 'Địa chỉ phải là https:// tới tên miền công khai (không dùng IP / localhost). Yêu cầu gửi: POST {Địa chỉ API}{Đường dẫn chat}.'),
+      h('div', { class: 'ai-grid' }, field('Mã (id)', f.id, '(a-z 0-9 - _)'), field('Tên hiển thị', f.label), field('Địa chỉ API', f.baseUrl), field('Đường dẫn chat', f.chatPath)),
+      field('Danh sách model', f.models), h('div', { class: 'ai-grid' }, field('Model mặc định', f.defaultModel), field('Gợi ý ô key', f.keyPlaceholder)),
+      h('details', null, h('summary', null, 'Nâng cao'), h('div', { class: 'stack' },
+        h('div', { class: 'ai-grid' }, field('Tên header xác thực', f.authHeader), field('Kiểu xác thực', f.authScheme), field('max_tokens', f.maxTokens)),
+        field('Regex lỗi chưa đăng ký model', f.subscribeRegex), h('label', { class: 'row opt' }, custom, h('span', null, 'Cho phép tự gõ tên model ngoài danh sách')))),
+      err, h('div', { class: 'row' }, saveBtn, cancel));
+  }
+
+  function draw() {
+    const have = new Set(providers.map((p) => p.id));
+    const addBtn = h('button', { class: 'btn primary' }, '＋ Thêm nhà cung cấp');
+    const slot = h('div');
+    addBtn.disabled = providers.length >= max;
+    addBtn.addEventListener('click', () => slot.replaceChildren(providerForm(null)));
+    const presetBtns = presets.filter((x) => !have.has(x.id)).map((x) => { const b = h('button', { class: 'btn small', type: 'button' }, `＋ ${x.label}`); b.addEventListener('click', () => slot.replaceChildren(providerForm(null, x))); return b; });
+    root.replaceChildren(h('h2', null, 'Cài đặt'), tabs('ai'),
+      h('div', { class: 'card stack' }, h('h3', null, 'Nhà cung cấp AI của bạn'),
+        h('p', { class: 'muted' }, 'Tự thêm nhà cung cấp mình dùng (Google Gemini có sẵn). Mỗi tài khoản có danh sách và key riêng — danh sách lưu ở ', h('code', null, 'AI-database/<id tài khoản>/index.json'), ', key được mã hoá. Nhà cung cấp mặc định dùng khi chấm tự luận / phân tích trắc nghiệm; ở từng bài vẫn chọn nhà khác được.'),
+        h('div', { class: 'row' }, addBtn, presetBtns.length ? h('span', { class: 'muted' }, 'hoặc thêm nhanh theo mẫu:') : null, ...presetBtns), slot),
+      ...providers.map(providerCard));
   }
   draw();
-  return box;
+  return root;
 }

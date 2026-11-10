@@ -21,7 +21,7 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     const ping = /only with the word OK/.test(JSON.stringify(b)); const analysis = /giảng viên hướng dẫn học tập/.test(JSON.stringify(b)); const reply = ping ? 'OK' : analysis ? JSON.stringify({ summary: 'Bạn yếu phần mạng', weakTopics: [{ topic: 'Giao thức', wrongCount: 1, questions: [1], advice: 'Ôn TCP/UDP' }], mistakes: [{ q: 1, why: 'Nhầm UDP với TCP', correctReasoning: 'UDP không kết nối', tip: 'Nhớ: U = Unreliable' }], studyPlan: ['Đọc lại chương giao thức'] }) : JSON.stringify({ score: 6, feedback: 'Khá tốt', strengths: ['đủ ý'], weaknesses: ['thiếu ví dụ'] });
     return new Response(JSON.stringify(String(url).includes('chat/completions') ? { choices: [{ message: { content: reply } }] } : { candidates: [{ content: { parts: [{ text: reply }] } }] }), { status: 200 });
   };
-  const app = createApp({ env, fetchImpl: gh.fetch, aiFetch, mailer });
+  const app = createApp({ env, fetchImpl: gh.fetch, aiFetch, mailer, dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }] });
   const api = http.createServer(app.handler).listen(4201);
   const web = http.createServer((req, res) => {
     let p = req.url.split('?')[0]; if (p === '/') p = '/index.html';
@@ -32,7 +32,8 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
 
   const browser = await chromium.launch(); const ctx = await browser.newContext({ colorScheme: 'dark' }); // máy ở chế độ tối vẫn phải ra nền trắng
   const page = await ctx.newPage();
-  const errors = []; page.on('pageerror', (e) => errors.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
+  const errors = []; page.on('pageerror', (e) => errors.push(e.message)); page.on('response', async (r) => { if (r.status() >= 400 && r.url().includes('/api/')) console.log('  [api]', r.status(), r.url().slice(-60), (await r.text().catch(() => '')).slice(0, 200)); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
   const B = 'http://127.0.0.1:4202/';
   const type = (sel) => page.$eval(sel, (e) => e.type);
   try {
@@ -64,20 +65,30 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     await cp.nth(1).locator('input').fill('matkhau-moi2'); await cp.nth(1).locator('.eye').click(); ok((await cp.nth(1).locator('input').getAttribute('type')) === 'text', 'ô mật khẩu mới hiện được');
     await cp.nth(0).locator('input').fill('matkhau-cu1'); await page.click('button:has-text("Đổi mật khẩu")'); await page.waitForSelector('.toast.ok:has-text("Đã đổi mật khẩu")'); ok(true, 'đổi mật khẩu thành công');
 
-    console.log('Cài đặt: Kết nối AI');
-    await page.waitForSelector('text=Kết nối AI');
-    const opts = await page.$$eval('.card:has-text("Kết nối AI") select >> nth=0', (s) => [...s[0].options].map((o) => o.value)); 
-    ok(['gemini', 'vilao', 'openai', 'deepseek', 'openrouter'].every((x) => opts.includes(x)), 'có đủ 5 nhà cung cấp: ' + opts.join(','));
-    const geminiModels = await page.$$eval('select[aria-label=Model] option', (o) => o.map((x) => x.value)); ok(geminiModels.includes('gemini-flash-latest') && geminiModels.includes('gemini-2.5-pro'), 'Gemini: danh sách model như bản cũ');
-    await page.selectOption('select[aria-label="Nhà cung cấp AI"]', 'vilao'); await page.waitForSelector('input[aria-label=Model]');
-    const dl = await page.$$eval('#ai-models option', (o) => o.map((x) => x.value)); ok(dl.includes('gpt-4o-mini') && dl.includes('chib/deepseek-v4.1-flash'), 'vilao.ai: gợi ý model như bản cũ');
-    await page.fill('input[aria-label=Model]', 'gpt-4o'); await page.fill('.card:has-text("Kết nối AI") .pw input', 'sk-vilao-abcdefgh');
-    await page.click('text=Kiểm tra kết nối AI'); await page.waitForSelector('.alert.ok:has-text("Kết nối được")'); const msg = await page.textContent('.alert.ok');
+    console.log('Cài đặt: trang riêng "Nhà cung cấp AI" (tự thêm như bản cũ)');
+    ok(await page.isVisible('.tabs a:has-text("Nhà cung cấp AI")'), 'Cài đặt có tab riêng "Nhà cung cấp AI"');
+    await page.click('.tabs a:has-text("Nhà cung cấp AI")'); await page.waitForSelector('h3:text-is("Nhà cung cấp AI của bạn")');
+    ok((await page.$$('.prov')).length === 1 && await page.isVisible('.prov:has-text("Google Gemini")'), 'tài khoản mới chỉ có Gemini dựng sẵn (nhà khác tự thêm)');
+    const geminiModels = await page.$$eval('.prov select[aria-label=Model] option', (o) => o.map((x) => x.value)); ok(geminiModels.includes('gemini-flash-latest') && geminiModels.includes('gemini-2.5-pro'), 'Gemini: danh sách model như bản cũ');
+    ok(!(await page.isVisible('.prov:has-text("Google Gemini") >> text=Xoá nhà cung cấp')), 'Gemini dựng sẵn không có nút xoá');
+    await page.click('button:has-text("＋ vilao.ai")'); await page.waitForSelector('.prov-form');
+    ok((await page.inputValue('.prov-form input[placeholder="https://api.openai.com"]')) === 'https://api.vilao.ai', 'mẫu vilao.ai điền sẵn địa chỉ API');
+    await page.fill('.prov-form input[placeholder="https://api.openai.com"]', 'http://api.vilao.ai'); await page.click('.prov-form button.primary'); await page.waitForSelector('.prov-form .alert.err:has-text("https://")'); ok(true, 'địa chỉ http:// bị từ chối ngay trong form');
+    await page.fill('.prov-form input[placeholder="https://api.openai.com"]', 'https://api.vilao.ai'); await page.click('.prov-form button.primary'); await page.waitForSelector('.prov:has(h3:has-text("vilao.ai"))'); ok(true, 'thêm nhà cung cấp vilao.ai');
+    const card = page.locator('.prov:has(h3:has-text("vilao.ai"))');
+    const dl = await page.$$eval('#models-vilao option', (o) => o.map((x) => x.value)); ok(dl.includes('gpt-4o-mini') && dl.includes('chib/deepseek-v4.1-flash'), 'vilao.ai: gợi ý model như bản cũ');
+    await card.locator('input[aria-label=Model]').fill('gpt-4o'); await card.locator('.pw input').fill('sk-vilao-abcdefgh');
+    await card.locator('button:has-text("Kiểm tra kết nối")').click(); await page.waitForSelector('.alert.ok:has-text("Kết nối được")'); const msg = await page.textContent('.alert.ok');
     ok(/vilao\.ai/.test(msg) && /gpt-4o/.test(msg) && /OK/.test(msg), 'báo kết nối được: ' + msg.trim());
     ok(aiCalls.at(-1).url === 'https://api.vilao.ai/v1/chat/completions' && aiCalls.at(-1).auth === 'Bearer sk-vilao-abcdefgh', 'gọi đúng địa chỉ vilao.ai bằng key vừa nhập');
-    ok((await page.$$eval('select[aria-label="Nhà cung cấp AI"] option', (o) => o.find((x) => x.value === 'vilao').textContent)).includes('✓'), 'nhà cung cấp đã có key được đánh dấu ✓');
-    page.once('dialog', (d) => d.accept()); await page.click('text=Xoá key'); await page.waitForSelector('.card:has-text("Kết nối AI") >> text=Xoá key', { state: 'detached' }); ok(true, 'xoá key');
-    await page.fill('.card:has-text("Kết nối AI") .pw input', 'sk-vilao-abcdefgh'); await page.click('.card:has-text("Kết nối AI") >> button:text-is("Lưu")'); await page.waitForSelector('.toast.ok:has-text("key được mã hoá")'); ok(true, 'lưu key lại');
+    await page.click('.prov:has(h3:has-text("vilao.ai")) >> button:has-text("Đặt làm mặc định")'); await page.waitForSelector('.prov:has(h3:has-text("vilao.ai")) >> text=Đang là mặc định'); ok(true, 'đặt vilao.ai làm mặc định');
+    ok(await page.isVisible('.prov:has(h3:has-text("vilao.ai")) >> text=✓ có key'), 'nhà đã có key được đánh dấu');
+    page.once('dialog', (d) => d.accept()); await page.click('.prov:has(h3:has-text("vilao.ai")) >> button:has-text("Xoá key")'); await page.waitForSelector('.prov:has(h3:has-text("vilao.ai")) >> text=chưa có key'); ok(true, 'xoá key');
+    await page.locator('.prov:has(h3:has-text("vilao.ai")) .pw input').fill('sk-vilao-abcdefgh'); await page.click('.prov:has(h3:has-text("vilao.ai")) >> button:has-text("Lưu key & model")'); await page.waitForSelector('.toast.ok:has-text("key được mã hoá")'); ok(true, 'lưu key lại');
+    await page.click('.prov:has(h3:has-text("vilao.ai")) >> button:has-text("Sửa nhà cung cấp")'); await page.waitForSelector('.prov-form');
+    await page.fill('.prov-form input[placeholder^="Tên hiển thị"]', 'vilao.ai'); await page.click('.prov-form button.primary'); await page.waitForSelector('.prov:has(h3:has-text("vilao.ai"))'); ok(true, 'sửa nhà cung cấp');
+    const aiDoc = JSON.parse(gh.file('tu-luyen-thi-cntt-utc-mnha-account', `AI-database/${(await page.evaluate(() => JSON.parse(localStorage.getItem('utc.auth.v2')).user.id))}/index.json`).toString());
+    ok(aiDoc.providers.length === 1 && aiDoc.providers[0].id === 'vilao' && !JSON.stringify(aiDoc).includes('sk-vilao-abcdefgh'), 'lưu ở AI-database/<uid>/index.json, không chứa key');
 
     console.log('Chấm tự luận bằng AI');
     const sess = await page.evaluate(() => JSON.parse(localStorage.getItem('utc.auth.v2'))); const tok = sess.accessToken; const H = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok };
@@ -93,22 +104,52 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     ok((await page.textContent('.top .who')) === 'mnha01@example.com', 'thanh trên cùng hiện email đăng nhập (không phải tên đăng nhập)');
     ok((await page.textContent('.top .avatar')) === 'M', 'avatar lấy chữ cái đầu của email');
 
+    console.log('Tạo đề 3 phần bằng giao diện (dán text như bản cũ)');
+    await page.goto(B + '#/quiz/new'); await page.waitForSelector('.qf');
+    ok(await page.isVisible('#btnCopyPrompt'), 'có nút Sao chép prompt mẫu'); await page.click('#btnTogglePrompt'); ok((await page.textContent('#promptBox')).includes('KHỐI 1') && (await page.textContent('#promptBox')).includes('KHỐI 3'), 'prompt mẫu mô tả quy luật 3 khối');
+    await page.fill('#fTitle', 'Mạng 3 phần'); await page.fill('#fSubject', 'Mạng');
+    await page.fill('#paste-mcq', '- UDP là giao thức gì?\n+)Hướng kết nối\n+)Không kết nối\n=> B\n++) UDP <b>không</b> thiết lập kết nối.\n- 1+1?\n+)1\n+)2\n=> B');
+    await page.fill('#paste-tf', '- Xét TCP:\n+)TCP tin cậy\n=> Đúng\n+)TCP không có bắt tay\n=> Sai');
+    await page.fill('#paste-fill', '- 10/4?\n=> 2.5 | 2,5');
+    await page.check('#fShuffle'); await page.click('#btnParse'); await page.waitForSelector('#cards-mcq .qc');
+    ok((await page.$$('#cards-mcq .qc')).length === 2 && (await page.$$('#cards-fill .qc')).length === 1, 'chuyển text → thẻ câu hỏi ở cả 3 phần');
+    await page.screenshot({ path: '/tmp/ui-editor.png', fullPage: true });
+    await page.click('#btnSave'); await page.waitForSelector('h2:text-is("Bài của tôi")', { timeout: 15000 }); ok(true, 'lưu đề 3 phần → quay về danh sách');
+    const ov = await (await fetch('http://127.0.0.1:4201/api/overview', { headers: H })).json(); const qid = ov.items.find((i) => i.title === 'Mạng 3 phần').id; ok(ov.items.find((i) => i.id === qid).size === 4, 'đề có 4 câu (2 + 1 + 1)');
+    console.log('Làm bài (có màn bắt đầu, xáo trộn, nộp, xem kết quả)');
+    await page.goto(B + '#/quiz/' + qid); await page.waitForSelector('#qxStartBtn'); ok(await page.isVisible('.qx-start-card'), 'màn hình bắt đầu hiện thông tin đề');
+    await page.click('#qxStartBtn'); await page.waitForSelector('#questionContainer .question-card, #questionContainer *');
+    await page.screenshot({ path: '/tmp/ui-take.png' });
+    const total = await page.textContent('#questionNumber'); ok(/1 \/ 4/.test(total), 'đánh số câu liền qua các phần: ' + total.trim());
+    // trả lời lần lượt: chọn đáp án đúng / điền chữ theo nội dung từng câu
+    for (let i = 0; i < 4; i++) {
+      const txt = await page.textContent('#questionContainer');
+      if (/UDP là giao thức/.test(txt)) await page.click('#questionContainer >> text=Không kết nối');
+      else if (/1\+1/.test(txt)) await page.click('#questionContainer >> text=/^\\s*B?\\.?\\s*2$/');
+      else if (/10\/4/.test(txt)) await page.fill('#fillInput', '2,5');
+      else if (/Xét TCP/.test(txt)) { const btns = await page.$$('#questionContainer button, #questionContainer label'); }
+      if (i < 3) await page.click('#nextBtn');
+    }
+    ok((await page.textContent('#answeredCount')) !== '0', 'đếm số câu đã trả lời');
+    page.once('dialog', (d) => d.accept()); await page.click('#submitMain'); await page.waitForSelector('#resultSection:not(.hidden)', { timeout: 15000 }); ok(true, 'nộp bài → hiện kết quả');
+    ok(await page.isVisible('#reviewList'), 'có phần đáp án & giải thích'); ok((await page.textContent('#reviewList')).includes('không'), 'hiện giải thích (++) của câu');
+    const qsid = (await page.getAttribute('#resultSection a[href^="#/submission/"]', 'href')).split('/').pop(); ok(!!qsid, 'có liên kết sang trang bài nộp');
     console.log('Phân tích AI trắc nghiệm');
-    const qid = 'c1b2c3d4e5f60718', qsid = 'd1b2c3d4e5f60718';
-    const qs = [{ text: 'UDP là giao thức gì?', options: [{ text: 'Hướng kết nối' }, { text: 'Không kết nối' }], correct: ['B'] }, { text: '1+1?', options: [{ text: '1' }, { text: '2' }], correct: ['B'] }];
-    const qr = await fetch('http://127.0.0.1:4201/api/quizzes/' + qid, { method: 'PUT', headers: H, body: JSON.stringify({ title: 'Mạng', subject: 'Mạng', questions: qs }) }); ok(qr.ok, 'tạo bài trắc nghiệm');
-    const qq = (await qr.json()).item.questions;
-    await fetch('http://127.0.0.1:4201/api/submissions/' + qsid, { method: 'PUT', headers: H, body: JSON.stringify({ itemType: 'quiz', itemId: qid, answers: { [qq[0].id]: 'A', [qq[1].id]: 'B' } }) });
     await page.goto(B + '#/submission/' + qsid); await page.waitForSelector('h3:text-is("Phân tích AI")');
     ok(await page.isVisible('.card:has-text("Phân tích AI") .ai-pick'), 'có bộ chọn nhà cung cấp/model + nút Phân tích AI');
     await page.click('button:has-text("Phân tích AI")'); await page.waitForSelector('.card.an');
     ok(await page.isVisible('.card.an >> text=Nhầm UDP với TCP') && await page.isVisible('.card.an >> text=Giao thức'), 'hiện chủ đề cần ôn + phân tích từng câu sai');
     ok(await page.isVisible('.card.an >> text=vilao.ai · gpt-4o'), 'ghi rõ nhà cung cấp + model');
-    await page.click('.card.an .chip >> nth=0'); await page.waitForSelector('#qc-1.flash'); ok(true, 'bấm chip "Câu 1" cuộn tới đúng câu');
+    await page.click('.card.an .chip >> nth=0'); await page.waitForSelector('.qcard.flash'); ok(true, 'bấm chip "Câu 1" cuộn tới đúng câu');
     ok(await page.isVisible('text=Đã dùng 1/5 lần'), 'hiện số lần đã dùng');
     await page.screenshot({ path: '/tmp/ui-analysis.png', fullPage: true });
     ok(errors.length === 0, 'không có lỗi JS/console: ' + JSON.stringify(errors));
-    await page.screenshot({ path: '/tmp/ui-submission.png' }); await page.goto(B + '#/settings'); await page.waitForSelector('text=Kết nối AI'); await page.screenshot({ path: '/tmp/ui-settings.png', fullPage: true });
+    await page.screenshot({ path: '/tmp/ui-submission.png' }); await page.goto(B + '#/settings/ai'); await page.waitForSelector('.prov'); await page.screenshot({ path: '/tmp/ui-settings.png', fullPage: true });
+    console.log('Đăng nhập bằng email');
+    await page.click('.top button:has-text("Đăng xuất")'); await page.waitForSelector('.auth');
+    ok(await page.isVisible('label:has-text("Tên đăng nhập hoặc email")'), 'ô đăng nhập ghi rõ "Tên đăng nhập hoặc email"');
+    await page.fill('input[autocomplete=username]', 'MNHA01@Example.com'); await page.fill('input[autocomplete=current-password]', 'matkhau-moi2'); await page.click('button[type=submit]'); await page.waitForSelector('text=Bài của tôi', { timeout: 15000 });
+    ok((await page.textContent('.top .who')) === 'mnha01@example.com', 'đăng nhập bằng EMAIL thành công');
     console.log('\nE2E UI: ĐẠT');
   } catch (e) { console.error('\nE2E UI LỖI:', e.message, '\nconsole:', errors); await page.screenshot({ path: '/tmp/e2e-ui-fail.png' }); process.exitCode = 1; }
   await browser.close(); api.close(); web.close();

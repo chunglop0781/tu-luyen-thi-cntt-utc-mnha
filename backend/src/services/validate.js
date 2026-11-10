@@ -29,36 +29,81 @@ function sanitizeEssay(input) {
     keywords: (Array.isArray(r && r.keywords) ? r.keywords : String((r && r.keywords) || '').split(',')).slice(0, 30).map((k) => clampStr(k, 60)).filter(Boolean),
   })).filter((r) => r.name);
   const modelAnswer = clampStr(input.modelAnswer, 30000);
-  return { ...base, prompt, modelAnswer, maxScore, rubric, images: imageRefs(prompt, modelAnswer) };
+  const untimed = input.timerMode === 'untimed' || input.duration === null || input.duration === undefined || input.duration === '' || input.duration === 'null';
+  const d = Number(input.duration);
+  if (!untimed && !(Number.isInteger(d) && d >= 1 && d <= 600)) throw bad('Thời gian làm bài phải là số phút nguyên từ 1 đến 600 (hoặc chọn “Không đếm giờ”).');
+  return { ...base, prompt, modelAnswer, maxScore, rubric, duration: untimed ? null : d, images: imageRefs(prompt, modelAnswer) };
 }
+
+const { parsePart, serializePart } = require('./quiz/parser');
+const qcfg = require('./quiz/config');
+const { sanitizeExplanationHtml } = require('./quiz/htmlsafe');
+const { normalizeAudioUrl } = require('./quiz/audio');
+const toNum = (v, def) => { const t = String(v == null ? '' : v).trim().replace(',', '.'); if (t === '') return def; const n = Number(t); return Number.isFinite(n) ? n : def; };
+const round4 = (n) => Math.round(n * 10000) / 10000;
+const MAX_TEXT = qcfg.LIMITS.MAX_RAW_TEXT_LEN;
+
+/** Dựng đề 3 phần từ text (chuyển từ bản cũ quiz.controller.js: buildQuiz). Server PARSE LẠI — không tin JSON từ client. */
+function buildQuiz(body) {
+  const errors = [];
+  const maxScore = toNum(body.maxScore, NaN);
+  if (!(maxScore > 0)) errors.push({ msg: 'Thang điểm tối đa phải là số lớn hơn 0 (VD 10 hoặc 2.5).' });
+  const parts = {}; let total = 0;
+  for (const part of qcfg.PARTS) {
+    const text = String(body[part] || '');
+    if (text.length > MAX_TEXT) { errors.push({ part, msg: 'Text quá dài.' }); continue; }
+    if (!text.trim()) continue;
+    const ppq = toNum(body['pointsPerQuestion_' + part], NaN);
+    if (!(ppq > 0)) { errors.push({ part, msg: '“Điểm / câu” phải là số lớn hơn 0 (VD 0.1, 0.2, 0.25, 1).' }); continue; }
+    const opts = {};
+    if (part === 'tf') {
+      const sc = String(body.scoring_tf || body.tfScoring || qcfg.TF_DEFAULT_SCORING || 'equal');
+      if (!qcfg.TF_SCORING.includes(sc)) { errors.push({ part, msg: 'Cách chia điểm phần Đúng/Sai không hợp lệ.' }); continue; }
+      opts.scoring = sc;
+    }
+    if (part === 'fill') { opts.tolerance = Math.max(0, toNum(body.tolerance, 0)); opts.note = String(body.note || '').trim().slice(0, 300); }
+    const r = parsePart(text, part, opts);
+    if (r.errors.length) { r.errors.forEach((e) => errors.push({ part, line: e.line, msg: e.msg })); continue; }
+    if (!r.questions.length) continue;
+    const questions = r.questions.map((q, i) => {
+      const id = `${part}-${i + 1}`;
+      if (part === 'tf') return { ...q, id, statements: (q.statements || []).map((st) => ({ ...st, explanationHtml: st.explanationHtml ? (sanitizeExplanationHtml(st.explanationHtml) || null) : null })) };
+      return { ...q, id, explanationHtml: q.explanationHtml ? (sanitizeExplanationHtml(q.explanationHtml) || null) : null };
+    });
+    parts[part] = { pointsPerQuestion: round4(ppq), questions };
+    if (part === 'tf') parts.tf.scoring = opts.scoring;
+    if (part === 'fill') { parts.fill.tolerance = opts.tolerance; parts.fill.note = opts.note || (r.note ? String(r.note).slice(0, 300) : ''); }
+    if (part !== 'tf' && r.clusters && r.clusters.length) parts[part].clusters = r.clusters;
+    total += questions.length;
+  }
+  if (!total && !errors.length) errors.push({ msg: 'Cần ít nhất 1 câu hỏi ở một phần nào đó.' });
+  if (errors.length) return { errors };
+  return { maxScore: round4(maxScore), parts };
+}
+
+const fail = (errors) => { throw new HttpError(400, `Đề chưa hợp lệ: ${errors[0].msg}${errors.length > 1 ? ` (và ${errors.length - 1} lỗi nữa)` : ''}`, 'VALIDATION', errors); };
+
+function previewQuiz(input) { const b = buildQuiz(input || {}); if (b.errors) fail(b.errors); return { maxScore: b.maxScore, parts: b.parts }; }
 
 function sanitizeQuiz(input) {
   const base = common(input, 'quiz');
-  const qs = Array.isArray(input.questions) ? input.questions : [];
-  if (!qs.length) throw bad('Bài trắc nghiệm cần ít nhất 1 câu');
-  if (qs.length > 300) throw bad('Tối đa 300 câu mỗi bài');
-  const seen = new Set();
-  const questions = qs.map((q, i) => {
-    const text = clampStr(q && q.text, 4000);
-    if (!text) throw bad(`Câu ${i + 1}: thiếu nội dung`);
-    const opts = (Array.isArray(q.options) ? q.options : []).slice(0, 10);
-    if (opts.length < 2) throw bad(`Câu ${i + 1}: cần ít nhất 2 đáp án`);
-    const options = opts.map((o, k) => {
-      let id = clampStr(o && o.id, 20);
-      if (!/^[A-Za-z0-9_-]{1,20}$/.test(id)) id = String.fromCharCode(65 + k);
-      return { id, text: clampStr(o && o.text, 1500) };
-    });
-    if (new Set(options.map((o) => o.id)).size !== options.length) throw bad(`Câu ${i + 1}: id đáp án bị trùng`);
-    if (options.some((o) => !o.text)) throw bad(`Câu ${i + 1}: có đáp án trống`);
-    const correct = [...new Set((Array.isArray(q.correct) ? q.correct : [q.correct]).map(String))].filter((c) => options.some((o) => o.id === c));
-    if (!correct.length) throw bad(`Câu ${i + 1}: chưa chọn đáp án đúng`);
-    let id = clampStr(q.id, 32); if (!/^[A-Za-z0-9_-]{1,32}$/.test(id) || seen.has(id)) id = 'q' + randomId(4);
-    seen.add(id);
-    return { id, text, options, correct, multiple: correct.length > 1, explanation: clampStr(q.explanation, 3000), points: Math.min(100, Math.max(0.25, Number(q.points) || 1)) };
-  });
-  const timeLimitMin = Math.min(600, Math.max(0, Math.floor(Number(input.timeLimitMin) || 0)));
-  const imgs = imageRefs(...questions.flatMap((q) => [q.text, q.explanation, ...q.options.map((o) => o.text)]));
-  return { ...base, questions, timeLimitMin, shuffle: !!input.shuffle, images: imgs };
+  const built = buildQuiz(input);
+  if (built.errors) fail(built.errors);
+  const untimed = input.timerMode === 'untimed' || input.duration === null || input.duration === 'null';
+  const d = toNum(input.duration, NaN);
+  if (!untimed && !(Number.isInteger(d) && d >= 1 && d <= 600)) throw bad('Thời gian làm bài phải là số phút nguyên từ 1 đến 600 (hoặc chọn “Không đếm giờ”).');
+  const audio = normalizeAudioUrl(input.audioUrl); if (audio.error) throw bad(audio.error);
+  const contentHtml = sanitizeExplanationHtml(clampStr(input.contentHtml, 20000), { maxLength: 20000 });
+  const out = { ...base, contentHtml, duration: untimed ? null : d, shuffle: !!input.shuffle, maxScore: built.maxScore, parts: built.parts, images: imageRefs(JSON.stringify(built.parts), contentHtml) };
+  if (audio.url) out.audioUrl = audio.url;
+  return out;
+}
+
+/** Văn bản 3 khối của một đề đã lưu (cho trình sửa đề). */
+function rawTexts(item) {
+  const raw = {};
+  for (const k of qcfg.PARTS) { const p = item.parts && item.parts[k]; raw[k] = p ? serializePart(p.questions, k, p.note, p.clusters) : ''; }
+  return raw;
 }
 
 /**
@@ -95,4 +140,4 @@ function parseQuizText(text) {
   return qs.map((q) => ({ ...q, correct: [...new Set(q.correct)], multiple: q.correct.length > 1 }));
 }
 
-module.exports = { sanitizeEssay, sanitizeQuiz, parseQuizText, imageRefs, IMG_TOKEN, bad, isId };
+module.exports = { sanitizeEssay, sanitizeQuiz, previewQuiz, rawTexts, buildQuiz, parseQuizText, imageRefs, IMG_TOKEN, bad, isId };

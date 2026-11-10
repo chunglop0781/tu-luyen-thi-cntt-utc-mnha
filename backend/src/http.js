@@ -2,7 +2,7 @@
 /** Router + tiện ích HTTP thuần Node (tương thích (req,res) của Vercel). Luôn gắn CORS, kể cả khi lỗi. */
 
 class HttpError extends Error {
-  constructor(status, message, code) { super(message); this.status = status; this.code = code; }
+  constructor(status, message, code, errors) { super(message); this.status = status; this.code = code; if (errors) this.errors = errors; }
 }
 
 function corsHeaders(req, cfg) {

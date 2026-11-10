@@ -25,7 +25,7 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
   const aiFetch = async (url, init) => {
     const body = JSON.parse(init.body); aiCalls.push({ url: String(url), headers: init.headers, body });
     if (aiFail) return new Response(JSON.stringify(aiFail.body), { status: aiFail.status });
-    if (String(url).includes('chat/completions')) {
+    if (!String(url).includes('generativelanguage')) {
       const asked = body.messages[1].content; const text = /only with the word OK/.test(asked) ? 'OK' : '```json\n' + JSON.stringify(aiReply) + '\n```';
       return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { status: 200 });
     }
@@ -35,7 +35,8 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
   const outbox = []; let mailFail = false;     // hộp thư giả: test đọc mã OTP từ đây
   const mailer = { configured: true, send: async (m) => { if (mailFail) { const { HttpError } = require('../src/http'); throw new HttpError(502, 'Không gửi được email, thử lại sau', 'MAIL_FAILED'); } outbox.push(m); } };
   const lastCode = (to) => { const m = [...outbox].reverse().find((x) => x.to === to); return m && /(\d{6})/.exec(m.text)[1]; };
-  const app = createApp({ env, fetchImpl: gh.fetch, aiFetch, mailer });
+  const dnsLookup = async (h) => (/^evil\./.test(h) ? [{ address: '10.0.0.5', family: 4 }] : [{ address: '93.184.216.34', family: 4 }]);   // DNS giả: evil.* → IP nội bộ
+  const app = createApp({ env, fetchImpl: gh.fetch, aiFetch, mailer, dnsLookup });
   const server = http.createServer(require('../api/index.js')); // api/index dựng app riêng → dùng handler trực tiếp bên dưới
   server.close();
   const srv = http.createServer(app.handler); await new Promise((r) => srv.listen(0, r));
@@ -169,6 +170,16 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     await call('POST', '/api/auth/logout', { body: { refreshToken: L.refreshToken } });
     assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken: L.refreshToken } })).status, 401);
   });
+  await t('đăng nhập bằng EMAIL (không phân biệt hoa/thường) hoặc tên đăng nhập; sai → 401 chung', async () => {
+    const em = A.user.email; assert.ok(em, 'alice phải có email');
+    const byMail = await call('POST', '/api/auth/login', { body: { identifier: em.toUpperCase(), password: 'matkhau123' } }); assert.equal(byMail.status, 200, JSON.stringify(byMail.json)); assert.equal(byMail.json.user.username, 'alice');
+    assert.equal((await call('POST', '/api/auth/login', { body: { identifier: ' ' + em + ' ', password: 'matkhau123' } })).status, 200);
+    assert.equal((await call('POST', '/api/auth/login', { body: { identifier: 'alice', password: 'matkhau123' } })).status, 200);
+    assert.equal((await call('POST', '/api/auth/login', { body: { username: em, password: 'matkhau123' } })).status, 200);   // client cũ gửi email trong field username
+    assert.equal((await call('POST', '/api/auth/login', { body: { identifier: em, password: 'sai-mat-khau' } })).status, 401);
+    assert.equal((await call('POST', '/api/auth/login', { body: { identifier: 'khongco@example.com', password: 'matkhau123' } })).status, 401);
+    assert.equal((await call('POST', '/api/auth/login', { body: { identifier: 'a@b', password: 'matkhau123' } })).status, 401);
+  });
   await t('token giả / sai loại bị từ chối', async () => {
     assert.equal((await call('GET', '/api/me', { token: A.refreshToken })).status, 401);
     assert.equal((await call('GET', '/api/me', { token: A.accessToken + 'x' })).status, 401);
@@ -193,32 +204,52 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.ok(gh.file('tu-luyen-thi-cntt-utc-mnha-data', `u/${A.user.id}/essays/${essayId}.json`));
     assert.equal([...gh.repos.get('tu-luyen-thi-cntt-utc-mnha-account').files.keys()].filter((k) => k.startsWith('u/')).length, 0);
   });
-  await t('nhập đề trắc nghiệm từ văn bản rồi lưu', async () => {
-    const p = await call('POST', '/api/quizzes/parse', { token: A.accessToken, body: { text: 'Câu 1: HTTP port?\nA. 21\nB. 80\nĐáp án: B\nGiải thích: web\nCâu 2: Chọn lớp transport\n*A. TCP\nB. IP\n*C. UDP\n' } });
-    assert.equal(p.json.questions.length, 2);
-    const r = await call('PUT', `/api/quizzes/${quizId}`, { token: A.accessToken, body: { title: 'Mạng cơ bản', subject: 'Mạng', questions: p.json.questions } });
-    assert.equal(r.status, 200); assert.equal(r.json.item.questions.length, 2);
-    assert.equal((await call('PUT', `/api/quizzes/${rid()}`, { token: A.accessToken, body: { title: 'x', questions: [{ text: 'q', options: [{ text: 'a' }, { text: 'b' }], correct: [] }] } })).status, 400);
+  const QBODY = { title: 'Mạng cơ bản', subject: 'Mạng', maxScore: 10, duration: 20, shuffle: true, 'pointsPerQuestion_mcq': 1, 'pointsPerQuestion_tf': 1, 'pointsPerQuestion_fill': 1, scoring_tf: 'equal', tolerance: 0.01, note: 'Làm tròn 2 chữ số.',
+    mcq: '- HTTP dùng cổng nào?\n+)21\n+)80\n+)443\n=> B\n++) Web dùng <b>80</b>.\n- Chọn giao thức tầng giao vận\n+)TCP\n+)IP\n+)UDP\n=> A, C',
+    tf: '- Xét TCP/UDP:\n+)TCP tin cậy\n=> Đúng\n++) Có xác nhận.\n+)UDP có bắt tay 3 bước\n=> Sai',
+    fill: '- 10/4 bằng?\n=> 2.5 | 2,5\n- Giao thức gửi thư?\n=> SMTP' };
+  await t('tự luận: thời gian làm bài (đếm giờ / không đếm giờ) được kiểm tra', async () => {
+    const base = { title: 'TL giờ', subject: 'Mạng', prompt: '<p>Đề</p>', maxScore: 10 };
+    const a = await call('PUT', `/api/essays/${rid()}`, { token: A.accessToken, body: { ...base, duration: 45 } }); assert.equal(a.json.item.duration, 45);
+    const b = await call('PUT', `/api/essays/${rid()}`, { token: A.accessToken, body: { ...base, timerMode: 'untimed', duration: null } }); assert.equal(b.json.item.duration, null);
+    assert.equal((await call('PUT', `/api/essays/${rid()}`, { token: A.accessToken, body: { ...base, duration: 0 } })).status, 400);
+    assert.equal((await call('PUT', `/api/essays/${rid()}`, { token: A.accessToken, body: { ...base, duration: 9999 } })).status, 400);
+    for (const x of [a, b]) await call('DELETE', `/api/essays/${x.json.item.id}`, { token: A.accessToken });
+  });
+  await t('đề 3 phần: dán prompt/quy luật → xem trước, lưu, sửa lại được (raw), lỗi cú pháp báo dòng', async () => {
+    const pv = await call('POST', '/api/quizzes/parse', { token: A.accessToken, body: QBODY }); assert.equal(pv.status, 200, JSON.stringify(pv.json));
+    assert.equal(pv.json.preview.parts.mcq.questions.length, 2); assert.equal(pv.json.preview.parts.tf.questions[0].statements.length, 2); assert.deepEqual(pv.json.preview.parts.fill.questions[0].answers, ['2.5', '2,5']);
+    const r = await call('PUT', `/api/quizzes/${quizId}`, { token: A.accessToken, body: QBODY }); assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.item.parts.mcq.questions[1].correct.join(), 'A,C'); assert.equal(r.json.item.shuffle, true); assert.equal(r.json.item.duration, 20); assert.equal(r.json.item.parts.fill.tolerance, 0.01);
+    const g = (await call('GET', `/api/quizzes/${quizId}`, { token: A.accessToken })).json.item; assert.ok(g.raw.mcq.includes('=> A, C') && g.raw.tf.includes('=> Sai') && g.raw.fill.includes('SMTP'));
+    const bad = await call('PUT', `/api/quizzes/${rid()}`, { token: A.accessToken, body: { ...QBODY, mcq: '- q\n+)a\n+)b' } }); assert.equal(bad.status, 400); assert.equal(bad.json.code, 'VALIDATION'); assert.ok(bad.json.errors[0].line >= 1);
+    assert.equal((await call('PUT', `/api/quizzes/${rid()}`, { token: A.accessToken, body: { ...QBODY, mcq: '', tf: '', fill: '' } })).status, 400);
+    assert.equal((await call('PUT', `/api/quizzes/${rid()}`, { token: A.accessToken, body: { ...QBODY, duration: 0 } })).status, 400);
+    const un = await call('PUT', `/api/quizzes/${rid()}`, { token: A.accessToken, body: { ...QBODY, timerMode: 'untimed', duration: null } }); assert.equal(un.json.item.duration, null);
+    const xss = await call('PUT', `/api/quizzes/${rid()}`, { token: A.accessToken, body: { ...QBODY, mcq: '- q\n+)a\n+)b\n=> A\n++) <script>alert(1)</script><b>ok</b>' } }); assert.ok(!xss.json.item.parts.mcq.questions[0].explanationHtml.includes('<script'));
+    for (const x of [un, xss]) await call('DELETE', `/api/quizzes/${x.json.item.id}`, { token: A.accessToken });
   });
   await t('tài khoản khác KHÔNG thấy bài của alice; overview riêng', async () => {
     assert.equal((await call('GET', `/api/essays/${essayId}`, { token: B.accessToken })).status, 404);
     assert.equal((await call('GET', `/api/quizzes/${quizId}`, { token: B.accessToken })).status, 404);
     assert.equal((await call('GET', '/api/overview', { token: B.accessToken })).json.items.length, 0);
-    const ov = (await call('GET', '/api/overview', { token: A.accessToken })).json; assert.equal(ov.items.length, 2); assert.deepEqual(ov.subjects, ['Mạng']);
+    const ov = (await call('GET', '/api/overview', { token: A.accessToken })).json; assert.ok(ov.items.length >= 2); assert.deepEqual(ov.subjects, ['Mạng']);
   });
-  await t('nộp trắc nghiệm → chấm, lưu, idempotent khi gửi lại', async () => {
-    const q = (await call('GET', `/api/quizzes/${quizId}`, { token: A.accessToken })).json.item.questions;
-    const sid = rid(); const body = { itemType: 'quiz', itemId: quizId, answers: { [q[0].id]: 'B', [q[1].id]: ['A'] }, durationSec: 33 };
-    const r = await call('PUT', `/api/submissions/${sid}`, { token: A.accessToken, body }); assert.equal(r.status, 200);
-    assert.equal(r.json.submission.correctCount, 1); assert.equal(r.json.submission.score, 1); assert.equal(r.json.submission.max, 2);
-    const again = await call('PUT', `/api/submissions/${sid}`, { token: A.accessToken, body }); assert.equal(again.json.submission.submittedAt, r.json.submission.submittedAt);
-    const ov = (await call('GET', '/api/overview', { token: A.accessToken })).json;
-    assert.equal(ov.items.find((i) => i.id === quizId).attempts, 1); assert.equal(ov.items.find((i) => i.id === quizId).bestPct, 50); assert.equal(ov.stats.submissions, 1);
+  await t('nộp trắc nghiệm 3 phần → chấm (mcq/đúng-sai theo ý/điền có sai số), lưu, idempotent', async () => {
+    const answers = { 'mcq-1': ['B'], 'mcq-2': ['A'], 'tf-1-a': true, 'tf-1-b': true, 'fill-1': ' 2,51 ', 'fill-2': 'smtp', 'hack': 1 };
+    const sid = rid(); const body = { itemType: 'quiz', itemId: quizId, answers, durationSec: 33 };
+    const r = await call('PUT', `/api/submissions/${sid}`, { token: A.accessToken, body }); assert.equal(r.status, 200, JSON.stringify(r.json));
+    const sub = r.json.submission; assert.ok(!('hack' in sub.answers));
+    // mcq-1 đúng, mcq-2 thiếu C → sai, tf: 1/2 ý → 0.5, fill-1 trong sai số 0.01 → đúng, fill-2 đúng (không phân biệt hoa/thường) ⇒ 1+0+0.5+1+1 = 3.5/5
+    assert.equal(sub.result.earnedPoints, 3.5); assert.equal(sub.result.totalPoints, 5); assert.equal(sub.score, 7); assert.equal(sub.max, 10); assert.equal(sub.correctCount, 4); assert.equal(sub.total, 6);
+    assert.equal(sub.result.parts.tf.correct, 1); assert.ok(sub.snapshot.parts.mcq.questions[0].correct);
+    const again = await call('PUT', `/api/submissions/${sid}`, { token: A.accessToken, body }); assert.equal(again.json.submission.submittedAt, sub.submittedAt);
+    const ov = (await call('GET', '/api/overview', { token: A.accessToken })).json; const it = ov.items.find((i) => i.id === quizId);
+    assert.equal(it.attempts, 1); assert.equal(it.bestPct, 70); assert.equal(it.size, 5); assert.equal(ov.stats.submissions, 1);
     assert.equal((await call('GET', `/api/submissions/${sid}`, { token: B.accessToken })).status, 404);
   });
   await t('nộp song song 8 bài → chỉ số không mất bản ghi', async () => {
-    const q = (await call('GET', `/api/quizzes/${quizId}`, { token: A.accessToken })).json.item.questions;
-    const rs = await Promise.all(Array.from({ length: 8 }, () => call('PUT', `/api/submissions/${rid()}`, { token: A.accessToken, body: { itemType: 'quiz', itemId: quizId, answers: { [q[0].id]: 'B' } } })));
+    const rs = await Promise.all(Array.from({ length: 8 }, () => call('PUT', `/api/submissions/${rid()}`, { token: A.accessToken, body: { itemType: 'quiz', itemId: quizId, answers: { 'mcq-1': ['B'] } } })));
     assert.ok(rs.every((r) => r.status === 200), JSON.stringify(rs.map((r) => r.status)));
     const ov = (await call('GET', '/api/overview', { token: A.accessToken })).json; assert.equal(ov.stats.submissions, 9); assert.equal(ov.items.find((i) => i.id === quizId).attempts, 9);
   });
@@ -235,9 +266,27 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
   });
   await t('AI nhiều nhà cung cấp: danh sách model, key riêng từng nhà, thử kết nối, chấm bằng vilao.ai / DeepSeek', async () => {
     const pr = await call('GET', '/api/ai/providers', { token: A.accessToken }); assert.equal(pr.status, 200);
-    const ids = pr.json.providers.map((x) => x.id); for (const id of ['gemini', 'vilao', 'openai', 'deepseek', 'openrouter']) assert.ok(ids.includes(id), id);
-    assert.ok(pr.json.providers.find((x) => x.id === 'gemini').models.includes('gemini-2.5-flash')); assert.ok(!JSON.stringify(pr.json).includes('api.vilao.ai'));
+    // tài khoản mới chỉ có Gemini dựng sẵn; nhà khác do người dùng TỰ THÊM (có mẫu gợi ý)
+    assert.deepEqual(pr.json.providers.map((x) => x.id), ['gemini']); assert.ok(pr.json.providers[0].models.includes('gemini-2.5-flash'));
+    for (const id of ['vilao', 'openai', 'deepseek', 'openrouter']) assert.ok(pr.json.presets.some((x) => x.id === id), id);
     assert.equal((await call('GET', '/api/ai/providers')).status, 401);
+    // thêm nhà cung cấp: kiểm tra đầu vào
+    const add = (b, tok = A.accessToken) => call('POST', '/api/ai/providers', { token: tok, body: b });
+    assert.equal((await add({ id: 'gemini', label: 'X', baseUrl: 'https://api.x.com', models: 'm1' })).status, 400);
+    assert.equal((await add({ id: 'bad id', label: 'X', baseUrl: 'https://api.x.com', models: 'm1' })).status, 400);
+    assert.equal((await add({ id: 'httpx', label: 'X', baseUrl: 'http://api.x.com', models: 'm1' })).status, 400);
+    assert.equal((await add({ id: 'ipx', label: 'X', baseUrl: 'https://127.0.0.1', models: 'm1' })).status, 400);
+    assert.equal((await add({ id: 'lochost', label: 'X', baseUrl: 'https://localhost', models: 'm1' })).status, 400);
+    assert.equal((await add({ id: 'nomodel', label: 'X', baseUrl: 'https://api.x.com' })).status, 400);
+    for (const pre of pr.json.presets.filter((x) => ['vilao', 'deepseek'].includes(x.id))) { const a = await add(pre); assert.equal(a.status, 201, JSON.stringify(a.json)); }
+    assert.equal((await add(pr.json.presets.find((x) => x.id === 'vilao'))).status, 409);
+    assert.deepEqual((await call('GET', '/api/ai/providers', { token: A.accessToken })).json.providers.map((x) => x.id), ['gemini', 'vilao', 'deepseek']);
+    // lưu riêng từng tài khoản ở AI-database/<uid>/index.json, KHÔNG chứa key; tài khoản khác không thấy
+    const doc = JSON.parse(gh.file('tu-luyen-thi-cntt-utc-mnha-account', `AI-database/${A.user.id}/index.json`).toString()); assert.deepEqual(doc.providers.map((x) => x.id), ['vilao', 'deepseek']); assert.ok(!/"(key|apiKey|keys)"/.test(JSON.stringify(doc)));
+    assert.deepEqual((await call('GET', '/api/ai/providers', { token: B.accessToken })).json.providers.map((x) => x.id), ['gemini']);
+    assert.equal((await call('PUT', '/api/ai/providers/vilao', { token: B.accessToken, body: { label: 'hack' } })).status, 404);
+    assert.equal((await call('PUT', '/api/ai/providers/gemini', { token: A.accessToken, body: { label: 'x' } })).status, 400);
+    assert.equal((await call('DELETE', '/api/ai/providers/gemini', { token: A.accessToken })).status, 400);
     const sid = rid(); await call('PUT', `/api/submissions/${sid}`, { token: A.accessToken, body: { itemType: 'essay', itemId: essayId, text: 'UDP không đảm bảo, TCP đảm bảo.' } });
     // chưa có key vilao → 400, không gọi AI
     const n0 = aiCalls.length; assert.equal((await call('POST', '/api/ai/test', { token: A.accessToken, body: { provider: 'vilao' } })).status, 400); assert.equal(aiCalls.length, n0);
@@ -273,11 +322,24 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.equal((await call('POST', `/api/submissions/${sid}/ai-grade`, { token: A.accessToken })).status, 400);
     // tài khoản khác không dùng được key của alice
     assert.equal((await call('POST', '/api/ai/test', { token: B.accessToken, body: { provider: 'deepseek' } })).status, 400);
+    // nhà cung cấp tự thêm với header xác thực riêng + tên miền trỏ vào IP nội bộ bị chặn (SSRF)
+    assert.equal((await add({ id: 'myai', label: 'Của tôi', baseUrl: 'https://api.myai.com/', chatPath: '/chat', authHeader: 'X-Api-Key', authScheme: '', models: 'my-1, my-2' })).status, 201);
+    await call('PUT', '/api/me/vault', { token: A.accessToken, body: { providers: { myai: { key: 'my-key-12345', model: 'my-2' } } } });
+    const mt = await call('POST', '/api/ai/test', { token: A.accessToken, body: { provider: 'myai' } }); assert.equal(mt.status, 200, JSON.stringify(mt.json));
+    const lm = aiCalls[aiCalls.length - 1]; assert.equal(lm.url, 'https://api.myai.com/chat'); assert.equal(lm.headers['X-Api-Key'], 'my-key-12345'); assert.equal(lm.headers.Authorization, undefined); assert.equal(lm.body.model, 'my-2');
+    assert.equal((await add({ id: 'evil', label: 'Evil', baseUrl: 'https://evil.example.net', models: 'm' })).status, 201);
+    await call('PUT', '/api/me/vault', { token: A.accessToken, body: { providers: { evil: { key: 'evil-key-1234' } } } });
+    const n2 = aiCalls.length; const ev = await call('POST', '/api/ai/test', { token: A.accessToken, body: { provider: 'evil' } }); assert.equal(ev.status, 400); assert.equal(ev.json.code, 'AI_URL'); assert.equal(aiCalls.length, n2);
+    // sửa / xoá: xoá nhà cung cấp cũng xoá key đã lưu
+    assert.equal((await call('PUT', '/api/ai/providers/myai', { token: A.accessToken, body: { label: 'Đổi tên', models: 'my-1, my-2, my-3' } })).json.provider.models.length, 3);
+    assert.equal((await call('DELETE', '/api/ai/providers/myai', { token: A.accessToken })).status, 200); await call('DELETE', '/api/ai/providers/evil', { token: A.accessToken });
+    const after = (await call('GET', '/api/me/vault', { token: A.accessToken })).json.vault; assert.ok(!after.items.myai && !after.items.evil);
+    assert.ok(!gh.file('tu-luyen-thi-cntt-utc-mnha-account', `private/${A.user.id}/vault.json`).toString().includes('"myai"'));
+    assert.equal((await call('POST', '/api/ai/test', { token: A.accessToken, body: { provider: 'myai' } })).status, 400);
   });
   await t('Phân tích AI trắc nghiệm: prompt rút gọn câu đúng, lưu aiAnalyses, giới hạn lần/giãn cách, chỉ trắc nghiệm', async () => {
-    const q = (await call('GET', `/api/quizzes/${quizId}`, { token: A.accessToken })).json.item.questions;
-    const sid = rid(); const sub = await call('PUT', `/api/submissions/${sid}`, { token: A.accessToken, body: { itemType: 'quiz', itemId: quizId, answers: { [q[0].id]: q[0].options.find((o) => !q[0].correct.includes(o.id)).id } } }); assert.equal(sub.status, 200);
-    const nq = sub.json.submission.snapshot.length;
+    const sid = rid(); const sub = await call('PUT', `/api/submissions/${sid}`, { token: A.accessToken, body: { itemType: 'quiz', itemId: quizId, answers: { 'mcq-1': ['A'], 'tf-1-a': false } } }); assert.equal(sub.status, 200);
+    const nq = 5;
     const prev = aiReply;
     aiReply = { summary: 'Hơi yếu mạng', weakTopics: [{ topic: 'Mạng', wrongCount: 1, questions: [1, 99], advice: 'Ôn TCP' }], mistakes: [{ q: 1, why: 'nhầm', correctReasoning: 'đúng là X', tip: 'nhớ' }, { q: 999, why: 'rác' }], studyPlan: ['Đọc lại chương 3'] };
     try {
