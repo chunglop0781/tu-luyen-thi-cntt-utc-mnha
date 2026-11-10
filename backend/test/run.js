@@ -8,7 +8,7 @@ const { createApp } = require('../src/app');
 const PAGES = 'https://alice.github.io';
 const env = {
   GITHUB_TOKEN: 't', GITHUB_OWNER: 'me', JWT_SECRET: 'j'.repeat(40), ENCRYPTION_KEY: 'k'.repeat(40), GITHUB_WEBHOOK_SECRET: 'whsec',
-  CRON_SECRET: 'cron', FRONTEND_ORIGINS: PAGES + ',https://other.github.io/', BCRYPT_ROUNDS: '8',
+  CRON_SECRET: 'cron', MAIL_USER: 'bot@example.com', MAIL_PASS: 'x', OTP_RESEND_SECONDS: '0', FRONTEND_ORIGINS: PAGES + ',https://other.github.io/', BCRYPT_ROUNDS: '8',
   IMAGE_REPO_LIMIT_MB: '0.02', IMAGE_REPO_RESERVE_MB: '0', PRUNE_DAYS: '5',
 };
 const PNG = (n = 100) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), crypto.randomBytes(n)]);
@@ -22,7 +22,10 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
   for (const r of ['tu-luyen-thi-cntt-utc-mnha-account', 'tu-luyen-thi-cntt-utc-mnha-data']) gh.ensure(r);
   let aiReply = { score: 7, feedback: 'Tốt', strengths: ['a'], weaknesses: ['b'] };
   const aiFetch = async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(aiReply) }] } }] }), { status: 200 });
-  const app = createApp({ env, fetchImpl: gh.fetch, aiFetch });
+  const outbox = []; let mailFail = false;     // hộp thư giả: test đọc mã OTP từ đây
+  const mailer = { configured: true, send: async (m) => { if (mailFail) { const { HttpError } = require('../src/http'); throw new HttpError(502, 'Không gửi được email, thử lại sau', 'MAIL_FAILED'); } outbox.push(m); } };
+  const lastCode = (to) => { const m = [...outbox].reverse().find((x) => x.to === to); return m && /(\d{6})/.exec(m.text)[1]; };
+  const app = createApp({ env, fetchImpl: gh.fetch, aiFetch, mailer });
   const server = http.createServer(require('../api/index.js')); // api/index dựng app riêng → dùng handler trực tiếp bên dưới
   server.close();
   const srv = http.createServer(app.handler); await new Promise((r) => srv.listen(0, r));
@@ -32,7 +35,11 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     const ct = res.headers.get('content-type') || '';
     return { status: res.status, headers: res.headers, json: ct.includes('json') ? await res.json() : null, buf: ct.includes('json') ? null : Buffer.from(await res.arrayBuffer()) };
   };
-  const reg = async (u, p = 'matkhau123') => (await call('POST', '/api/auth/register', { body: { username: u, password: p, displayName: u.toUpperCase() } })).json;
+  const reg = async (u, p = 'matkhau123') => {      // đăng ký 2 bước: gửi OTP → nhập OTP
+    const email = `${u}@example.com`;
+    const s1 = await call('POST', '/api/auth/register/start', { body: { username: u, email, password: p, displayName: u.toUpperCase() } }); assert.equal(s1.status, 200, JSON.stringify(s1.json));
+    return (await call('POST', '/api/auth/register/verify', { body: { email, code: lastCode(email) } })).json;
+  };
 
   console.log('CORS & kết nối GitHub Pages ↔ Vercel');
   await t('preflight OPTIONS từ GitHub Pages → 204 + header CORS', async () => {
@@ -64,9 +71,84 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     B = await reg('bob');
   });
   await t('trùng tên 409, tên xấu 400, mật khẩu yếu 400', async () => {
-    assert.equal((await call('POST', '/api/auth/register', { body: { username: 'ALICE', password: 'matkhau123' } })).status, 409);
-    assert.equal((await call('POST', '/api/auth/register', { body: { username: '../x', password: 'matkhau123' } })).status, 400);
-    assert.equal((await call('POST', '/api/auth/register', { body: { username: 'carol', password: 'short' } })).status, 400);
+    const st = (b) => call('POST', '/api/auth/register/start', { body: b }).then((r) => r.status);
+    assert.equal(await st({ username: 'ALICE', email: 'new@example.com', password: 'matkhau123' }), 409);
+    assert.equal(await st({ username: '../x', email: 'new@example.com', password: 'matkhau123' }), 400);
+    assert.equal(await st({ username: 'carol', email: 'new@example.com', password: 'short' }), 400);
+  });
+
+  console.log('Xác minh email bằng OTP');
+  await t('đăng ký cũ (không OTP) bị chặn khi REQUIRE_EMAIL_OTP bật', async () => {
+    const r = await call('POST', '/api/auth/register', { body: { username: 'zed', password: 'matkhau123' } }); assert.equal(r.status, 403); assert.equal(r.json.code, 'OTP_REQUIRED');
+  });
+  await t('start: gửi đúng 1 thư có mã 6 số; CHƯA tạo tài khoản; repo lưu băm mã, không lưu mã/mật khẩu thô', async () => {
+    const n = outbox.length;
+    const r = await call('POST', '/api/auth/register/start', { body: { username: 'dave', email: 'Dave@Example.com', password: 'matkhau123' } });
+    assert.equal(r.status, 200); assert.equal(r.json.email, 'da**@example.com'); assert.equal(outbox.length, n + 1);
+    const code = lastCode('dave@example.com'); assert.match(code, /^\d{6}$/);
+    assert.equal(gh.file('tu-luyen-thi-cntt-utc-mnha-account', 'users/dave.json'), undefined);
+    const all = [...gh.repos.get('tu-luyen-thi-cntt-utc-mnha-account').files.keys()].filter((f) => f.startsWith('otp/')); assert.equal(all.length, 1);
+    const raw = gh.file('tu-luyen-thi-cntt-utc-mnha-account', all[0]); assert.ok(!raw.includes(code) && !raw.includes('matkhau123'));
+  });
+  await t('sai mã giảm lượt thử; đúng mã → tạo tài khoản (email lưu chuẩn hoá) + đăng nhập được', async () => {
+    const w = await call('POST', '/api/auth/register/verify', { body: { email: 'dave@example.com', code: '000000' === lastCode('dave@example.com') ? '111111' : '000000' } });
+    assert.equal(w.status, 400); assert.equal(w.json.code, 'OTP_WRONG'); assert.match(w.json.error, /còn 4 lần/);
+    assert.equal((await call('POST', '/api/auth/register/verify', { body: { email: 'dave@example.com', code: 'abc' } })).status, 400);
+    const ok = await call('POST', '/api/auth/register/verify', { body: { email: 'dave@example.com', code: lastCode('dave@example.com') } });
+    assert.equal(ok.status, 201); assert.equal(ok.json.user.username, 'dave'); assert.equal(ok.json.user.email, 'da**@example.com');
+    assert.equal(JSON.parse(gh.file('tu-luyen-thi-cntt-utc-mnha-account', 'users/dave.json')).email, 'dave@example.com');
+    assert.equal((await call('POST', '/api/auth/login', { body: { username: 'dave', password: 'matkhau123' } })).status, 200);
+    // mã đã dùng không dùng lại được
+    assert.equal((await call('POST', '/api/auth/register/verify', { body: { email: 'dave@example.com', code: '123456' } })).json.code, 'OTP_EXPIRED');
+  });
+  await t('email đã dùng → 409; tên đã dùng → 409', async () => {
+    const r = await call('POST', '/api/auth/register/start', { body: { username: 'dave2', email: 'DAVE@example.com', password: 'matkhau123' } }); assert.equal(r.status, 409); assert.equal(r.json.code, 'EMAIL_TAKEN');
+  });
+  await t('nhập sai quá 5 lần → khoá, phải gửi lại mã mới (mã cũ hết tác dụng)', async () => {
+    await call('POST', '/api/auth/register/start', { body: { username: 'erin', email: 'erin@example.com', password: 'matkhau123' } });
+    const good = lastCode('erin@example.com'); const bad = good === '123456' ? '654321' : '123456'; let last;
+    for (let i = 0; i < 6; i++) last = await call('POST', '/api/auth/register/verify', { body: { email: 'erin@example.com', code: bad } });
+    assert.equal(last.status, 429); assert.equal(last.json.code, 'OTP_LOCKED');
+    assert.equal((await call('POST', '/api/auth/register/verify', { body: { email: 'erin@example.com', code: good } })).json.code, 'OTP_EXPIRED');
+    await call('POST', '/api/auth/register/start', { body: { username: 'erin', email: 'erin@example.com', password: 'matkhau123' } });
+    assert.equal((await call('POST', '/api/auth/register/verify', { body: { email: 'erin@example.com', code: lastCode('erin@example.com') } })).status, 201);
+  });
+  await t('gửi lại mã → mã mới hợp lệ, mã cũ vô hiệu', async () => {
+    await call('POST', '/api/auth/register/start', { body: { username: 'finn', email: 'finn@example.com', password: 'matkhau123' } }); const c1 = lastCode('finn@example.com');
+    await call('POST', '/api/auth/register/start', { body: { username: 'finn', email: 'finn@example.com', password: 'matkhau123' } }); const c2 = lastCode('finn@example.com');
+    if (c1 !== c2) assert.equal((await call('POST', '/api/auth/register/verify', { body: { email: 'finn@example.com', code: c1 } })).status, 400);
+    assert.equal((await call('POST', '/api/auth/register/verify', { body: { email: 'finn@example.com', code: c2 } })).status, 201);
+  });
+  await t('mã hết hạn → OTP_EXPIRED', async () => {
+    await call('POST', '/api/auth/register/start', { body: { username: 'gina', email: 'gina@example.com', password: 'matkhau123' } }); const c = lastCode('gina@example.com');
+    const real = Date.now; Date.now = () => real() + 11 * 60 * 1000;
+    try { assert.equal((await call('POST', '/api/auth/register/verify', { body: { email: 'gina@example.com', code: c } })).json.code, 'OTP_EXPIRED'); } finally { Date.now = real; }
+  });
+  await t('gửi mail lỗi → 502, không để lại bản ghi OTP kẹt cooldown', async () => {
+    mailFail = true; const r = await call('POST', '/api/auth/register/start', { body: { username: 'hank', email: 'hank@example.com', password: 'matkhau123' } }); mailFail = false;
+    assert.equal(r.status, 502); assert.equal(r.json.code, 'MAIL_FAILED');
+    assert.equal((await call('POST', '/api/auth/register/start', { body: { username: 'hank', email: 'hank@example.com', password: 'matkhau123' } })).status, 200);
+  });
+  await t('email sai định dạng → 400', async () => {
+    assert.equal((await call('POST', '/api/auth/register/start', { body: { username: 'ivy', email: 'khong-phai-email', password: 'matkhau123' } })).json.code, 'BAD_EMAIL');
+  });
+  await t('quên mật khẩu: email lạ vẫn trả ok nhưng KHÔNG gửi thư; email thật → OTP → đổi mật khẩu, đăng xuất mọi phiên', async () => {
+    const n = outbox.length;
+    assert.equal((await call('POST', '/api/auth/reset/start', { body: { email: 'khonghave@example.com' } })).status, 200); assert.equal(outbox.length, n);
+    const L = (await call('POST', '/api/auth/login', { body: { username: 'dave', password: 'matkhau123' } })).json;
+    assert.equal((await call('POST', '/api/auth/reset/start', { body: { email: 'dave@example.com' } })).status, 200); assert.equal(outbox.length, n + 1);
+    const code = lastCode('dave@example.com');
+    assert.equal((await call('POST', '/api/auth/reset/confirm', { body: { email: 'dave@example.com', code, newPassword: 'ngan' } })).status, 400); // mật khẩu yếu → chưa tiêu mã? (đã kiểm tra trước khi tiêu)
+    assert.equal((await call('POST', '/api/auth/reset/confirm', { body: { email: 'dave@example.com', code, newPassword: 'matkhau-moi-1' } })).status, 200);
+    assert.equal((await call('POST', '/api/auth/login', { body: { username: 'dave', password: 'matkhau123' } })).status, 401);
+    assert.equal((await call('POST', '/api/auth/login', { body: { username: 'dave', password: 'matkhau-moi-1' } })).status, 200);
+    assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken: L.refreshToken } })).status, 401);
+  });
+  await t('REQUIRE_EMAIL_OTP=false → đăng ký thẳng như cũ (không cần email)', async () => {
+    const g = new FakeGitHub('me'); g.ensure('tu-luyen-thi-cntt-utc-mnha-account'); g.ensure('tu-luyen-thi-cntt-utc-mnha-data');
+    const a = createApp({ env: { ...env, REQUIRE_EMAIL_OTP: 'false', MAIL_USER: '', MAIL_PASS: '' }, fetchImpl: g.fetch }); const s = http.createServer(a.handler); await new Promise((r) => s.listen(0, r));
+    const r = await fetch(`http://127.0.0.1:${s.address().port}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'legacy', password: 'matkhau123' }) }); s.close();
+    assert.equal(r.status, 201);
   });
   await t('đăng nhập đúng/sai; refresh; logout thu hồi phiên', async () => {
     assert.equal((await call('POST', '/api/auth/login', { body: { username: 'alice', password: 'sai-roi-nha' } })).status, 401);

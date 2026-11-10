@@ -1,9 +1,10 @@
 'use strict';
-const { config, problems } = require('./config');
+const { config, problems, warnings } = require('./config');
 const { GitHub, GitHubError } = require('./github');
 const { Store } = require('./store');
 const { HttpError, Router, corsHeaders, readBody, parseJson, send, sendJson } = require('./http');
 const { createAuth } = require('./services/auth');
+const { createMailer } = require('./services/mailer');
 const { createImages } = require('./services/images');
 const { createContent } = require('./services/content');
 const { createWebhook } = require('./services/webhook');
@@ -23,13 +24,14 @@ function limiter() {
   };
 }
 
-function createApp({ env = process.env, fetchImpl, aiFetch } = {}) {
+function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl } = {}) {
   const cfg = config(env);
   const gh = new GitHub({ token: cfg.token, owner: cfg.owner, branch: cfg.branch, fetchImpl });
   const store = new Store(gh, { account: cfg.accountRepo, data: cfg.dataRepo });
   const wh = createWebhook({ cfg, store, images: { noteSize: (n, b) => images.noteSize(n, b) } });
   const images = createImages({ cfg, gh, store, ensureWebhook: (r) => wh.ensureHook(gh, r) });
-  const auth = createAuth({ cfg, store });
+  const mailer = mailerImpl || createMailer(cfg);
+  const auth = createAuth({ cfg, store, mailer });
   const content = createContent({ cfg, store, images, fetchImpl: aiFetch });
   const allow = limiter();
   const router = new Router();
@@ -40,7 +42,7 @@ function createApp({ env = process.env, fetchImpl, aiFetch } = {}) {
 
   // ── Hệ thống ──
   router.get('/api/health', async (ctx) => {
-    const out = { ok: true, service: 'tu-luyen-thi-cntt-utc-mnha', version: cfg.version, time: new Date().toISOString(), problems: problems(cfg) };
+    const out = { ok: true, service: 'tu-luyen-thi-cntt-utc-mnha', version: cfg.version, time: new Date().toISOString(), problems: problems(cfg), warnings: warnings(cfg), emailOtp: cfg.requireOtp };
     if (ctx.query.get('deep') === '1') {
       try { out.github = { account: !!(await gh.getRepo(cfg.accountRepo)), data: !!(await gh.getRepo(cfg.dataRepo)) }; }
       catch (e) { out.ok = false; out.github = { error: e.message }; }
@@ -54,6 +56,25 @@ function createApp({ env = process.env, fetchImpl, aiFetch } = {}) {
     if (!allow('reg:' + ip(ctx.req), 10, 3600e3)) throw new HttpError(429, 'Đăng ký quá nhiều lần, thử lại sau', 'RATE');
     return { ok: true, ...(await auth.register(ctx.body, ua(ctx.req))) };
   }, { status: 201 });
+  // Đăng ký có xác minh email: (1) gửi OTP  (2) nhập OTP → tạo tài khoản. Gọi lại (1) = gửi lại mã.
+  const emailOf = (b) => String((b && b.email) || '').trim().toLowerCase();
+  router.post('/api/auth/register/start', async (ctx) => {
+    if (!allow('otp:' + ip(ctx.req), 40, 3600e3) || !allow('otpe:' + emailOf(ctx.body), 6, 3600e3)) throw new HttpError(429, 'Yêu cầu gửi mã quá nhiều, thử lại sau', 'RATE');
+    return { ok: true, ...(await auth.registerStart(ctx.body)) };
+  });
+  router.post('/api/auth/register/verify', async (ctx) => {
+    if (!allow('otpv:' + ip(ctx.req), 120, 3600e3)) throw new HttpError(429, 'Thử mã quá nhiều lần, thử lại sau', 'RATE');
+    return { ok: true, ...(await auth.registerVerify(ctx.body, ua(ctx.req))) };
+  }, { status: 201 });
+  // Quên mật khẩu bằng OTP gửi về email đã xác minh
+  router.post('/api/auth/reset/start', async (ctx) => {
+    if (!allow('rst:' + ip(ctx.req), 40, 3600e3) || !allow('rste:' + emailOf(ctx.body), 6, 3600e3)) throw new HttpError(429, 'Yêu cầu gửi mã quá nhiều, thử lại sau', 'RATE');
+    return { ok: true, ...(await auth.resetStart(ctx.body)) };
+  });
+  router.post('/api/auth/reset/confirm', async (ctx) => {
+    if (!allow('rstv:' + ip(ctx.req), 120, 3600e3)) throw new HttpError(429, 'Thử mã quá nhiều lần, thử lại sau', 'RATE');
+    await auth.resetConfirm(ctx.body); return { ok: true };
+  });
   router.post('/api/auth/login', async (ctx) => {
     if (!allow('login:' + ip(ctx.req), 20, 600e3) || !allow('loginu:' + String(ctx.body.username).toLowerCase(), 10, 600e3)) throw new HttpError(429, 'Thử đăng nhập quá nhiều lần, đợi vài phút', 'RATE');
     return { ok: true, ...(await auth.login(ctx.body, ua(ctx.req))) };

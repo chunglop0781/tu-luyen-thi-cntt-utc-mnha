@@ -35,6 +35,19 @@ function config(env = process.env) {
     bcryptRounds: Math.min(14, Math.max(8, num(env.BCRYPT_ROUNDS, 10))),
     registrationOpen: bool(env.REGISTRATION_OPEN, true),
     inviteCode: env.INVITE_CODE || '',
+    // ── Xác minh email bằng mã OTP (gửi qua SMTP, mặc định Gmail + App Password) ──
+    requireOtp: bool(env.REQUIRE_EMAIL_OTP, true),
+    otpTtlSec: Math.round(num(env.OTP_TTL_MINUTES, 10) * 60),
+    otpMaxAttempts: num(env.OTP_MAX_ATTEMPTS, 5),
+    otpResendSec: num(env.OTP_RESEND_SECONDS, 60),
+    mail: {
+      user: env.MAIL_USER || '',
+      pass: String(env.MAIL_PASS || '').replace(/\s+/g, ''), // Gmail hiện App Password dạng "abcd efgh ..." → bỏ khoảng trắng
+      host: env.MAIL_HOST || 'smtp.gmail.com',
+      port: num(env.MAIL_PORT, 465),
+      secure: bool(env.MAIL_SECURE, true),
+      from: env.MAIL_FROM || '',
+    },
     pruneDays: num(env.PRUNE_DAYS, 5),
     pruneMaxReplay: num(env.PRUNE_MAX_REPLAY, 150),
     geminiModel: env.GEMINI_MODEL || 'gemini-2.5-flash',
@@ -53,4 +66,11 @@ function problems(cfg) {
   return p;
 }
 
-module.exports = { config, problems };
+/** Cảnh báo không chặn hoạt động (đăng nhập vẫn chạy; chỉ đăng ký mới cần mail). */
+function warnings(cfg) {
+  const w = [];
+  if (cfg.requireOtp && (!cfg.mail.user || !cfg.mail.pass)) w.push('Chưa đặt MAIL_USER / MAIL_PASS nên chưa gửi được OTP đăng ký (hoặc đặt REQUIRE_EMAIL_OTP=false để tắt xác minh email)');
+  return w;
+}
+
+module.exports = { config, problems, warnings };

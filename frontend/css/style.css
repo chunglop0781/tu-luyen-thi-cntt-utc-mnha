@@ -33,3 +33,4 @@ input[type=checkbox],input[type=radio]{width:auto}textarea{resize:vertical}input
 .toasts{position:fixed;right:12px;bottom:12px;display:flex;flex-direction:column;gap:8px;z-index:20;max-width:min(92vw,380px)}
 .toast{background:var(--text);color:var(--bg);padding:10px 14px;border-radius:10px;box-shadow:0 4px 16px #0004}.toast.ok{background:var(--good);color:#fff}.toast.err{background:var(--low);color:#fff}
 details summary{cursor:pointer;font-weight:600}
+.otp{text-align:center;font-size:22px;letter-spacing:6px;font-weight:700}

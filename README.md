@@ -36,7 +36,7 @@ Không dùng MongoDB, Cloudinary hay Express. Backend chỉ phụ thuộc đúng
 Giao diện (`index.html`, `404.html`, `config.js`, `css/`, `js/`, `img/`) nằm ngay ở thư mục gốc, không cần build.
 1. Sửa `config.js`: `API_BASE` = `https://<project>.vercel.app`, commit và push.
 2. *Settings → Pages → Source: **Deploy from a branch** → `main` → `/ (root)`*.
-3. Mở `https://TEN_GITHUB.github.io/TEN_REPO/` → Đăng ký.
+3. Mở `https://TEN_GITHUB.github.io/TEN_REPO/` → Đăng ký (nhập email, nhận mã OTP 6 số để xác minh; cấu hình gửi mail ở mục *Phần OTP* trong `HUONG-DAN-CAI-DAT.md`).
 
 ## Vì sao Pages ↔ Vercel chạy ổn định
 | Rủi ro | Cách xử lý |

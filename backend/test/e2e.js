@@ -6,15 +6,16 @@ const { chromium } = require('playwright');
 const { FakeGitHub } = require('./fakeGithub');
 const { createApp } = require('../src/app');
 
-const FRONT = path.join(__dirname, '..', '..');
+const FRONT = path.join(__dirname, '..', '..', 'frontend');
 const env = { GITHUB_TOKEN: 't', GITHUB_OWNER: 'me', JWT_SECRET: 'j'.repeat(40), ENCRYPTION_KEY: 'k'.repeat(40), GITHUB_WEBHOOK_SECRET: 's', CRON_SECRET: 'c',
-  FRONTEND_ORIGINS: 'http://127.0.0.1:4102', BCRYPT_ROUNDS: '8', ACCESS_TOKEN_MINUTES: '0.05' /* 3 giây: ép chạy đường refresh */ };
+  FRONTEND_ORIGINS: 'http://127.0.0.1:4102', MAIL_USER: 'bot@example.com', MAIL_PASS: 'x', BCRYPT_ROUNDS: '8', ACCESS_TOKEN_MINUTES: '0.05' /* 3 giây: ép chạy đường refresh */ };
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
 const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓', m); };
 
 (async () => {
   const gh = new FakeGitHub('me'); gh.ensure('tu-luyen-thi-cntt-utc-mnha-account'); gh.ensure('tu-luyen-thi-cntt-utc-mnha-data');
-  const app = createApp({ env, fetchImpl: gh.fetch });
+  const outbox = []; const mailer = { configured: true, send: async (m) => { outbox.push(m); } };
+  const app = createApp({ env, fetchImpl: gh.fetch, mailer });
   const api = http.createServer(app.handler).listen(4101);
   const web = http.createServer((req, res) => {
     let p = req.url.split('?')[0]; if (p === '/') p = '/index.html';
@@ -29,7 +30,9 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
   try {
     await page.goto(B); await page.waitForSelector('.auth');
     console.log('Đăng ký / đăng nhập qua CORS');
-    await page.click('text=Đăng ký'); await page.fill('input[autocomplete=username]', 'sv01'); await page.fill('input[type=password]', 'matkhau-xin'); await page.fill('input[placeholder^="Tên hiển thị"]', 'Sinh viên 01');
+    await page.click('text=Đăng ký'); await page.fill('input[autocomplete=username]', 'sv01'); await page.fill('input[type=email]', 'sv01@example.com'); await page.fill('input[type=password]', 'matkhau-xin'); await page.fill('input[placeholder^="Tên hiển thị"]', 'Sinh viên 01');
+    await page.click('button[type=submit]'); await page.waitForSelector('input.otp');   // bước nhập OTP
+    await page.fill('input.otp', /(\d{6})/.exec(outbox[outbox.length - 1].text)[1]);
     await page.click('button[type=submit]'); await page.waitForSelector('text=Bài của tôi', { timeout: 15000 });
     ok(page.url().endsWith('#/'), 'đăng ký xong vào trang chủ (hash router)');
 

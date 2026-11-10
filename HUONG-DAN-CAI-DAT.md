@@ -78,6 +78,13 @@ Cùng một danh sách biến được dùng ở 3 nơi, tuỳ cách bạn chọ
 | `CRON_SECRET` | chuỗi ngẫu nhiên | Bước 0.3 |
 | `FRONTEND_ORIGINS` | `https://TEN_GITHUB.github.io` | Chỉ scheme + host, **không** có `/tu-luyen-thi-cntt-utc-mnha`. Nhiều địa chỉ thì cách nhau dấu phẩy |
 
+**Gửi mã OTP xác minh email** (bắt buộc nếu để `REQUIRE_EMAIL_OTP=true`, là mặc định — cách lấy xem mục *Phần OTP* bên dưới)
+
+| Biến | Giá trị | Ghi chú |
+|---|---|---|
+| `MAIL_USER` | `ten.ban@gmail.com` | Gmail dùng để gửi mã |
+| `MAIL_PASS` | `abcdefghijklmnop` | **Mật khẩu ứng dụng** 16 ký tự của Gmail, KHÔNG phải mật khẩu đăng nhập Gmail. Có dấu cách cũng được, hệ thống tự bỏ |
+
 **Nên đặt**
 
 | Biến | Giá trị | Ghi chú |
@@ -100,7 +107,36 @@ Cùng một danh sách biến được dùng ở 3 nơi, tuỳ cách bạn chọ
 | `INVITE_CODE` | (trống) | Đặt một mã nếu muốn ai đăng ký cũng phải nhập mã mời |
 | `PRUNE_DAYS` / `PRUNE_MAX_REPLAY` | `5` / `150` | Dọn commit sau 5 ngày, giữ tối đa 150 commit mới nhất |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Model chấm tự luận. Mỗi tài khoản tự nhập Gemini key trong trang Cài đặt |
+| `REQUIRE_EMAIL_OTP` | `true` | `true`: đăng ký phải nhập mã OTP gửi về email. `false`: tắt OTP, đăng ký thẳng bằng tên + mật khẩu (không cần `MAIL_*`) |
+| `MAIL_HOST` / `MAIL_PORT` / `MAIL_SECURE` | `smtp.gmail.com` / `465` / `true` | Chỉ đổi khi dùng nhà cung cấp mail khác (Brevo, SendGrid, Mailgun…) |
+| `MAIL_FROM` | (trống) | Tên hiển thị ở người gửi, ví dụ `"Tự luyện thi" <ten.ban@gmail.com>`. Trống = tự lấy từ `MAIL_USER` |
+| `OTP_TTL_MINUTES` | `10` | Mã sống bao lâu |
+| `OTP_MAX_ATTEMPTS` | `5` | Nhập sai quá số lần này thì phải xin mã mới |
+| `OTP_RESEND_SECONDS` | `60` | Giãn cách giữa 2 lần gửi mã |
 | `ALLOW_LOCALHOST` | `false` | Chỉ đặt `true` khi chạy thử trên máy (Cách 3). **Đừng bật trên Vercel** |
+
+### Phần OTP. Lấy "Mật khẩu ứng dụng" Gmail để gửi mã
+
+Giống dự án *Luyện thi CNTT UTC*: backend gửi mail qua SMTP của Gmail, nên cần một **mật khẩu ứng dụng** (App Password).
+
+1. Đăng nhập Gmail định dùng để gửi mã (nên tạo riêng một Gmail cho dự án, đừng dùng Gmail cá nhân chính).
+2. Vào <https://myaccount.google.com/security> → bật **Xác minh 2 bước** (bắt buộc, chưa bật thì không tạo được mật khẩu ứng dụng).
+3. Vào <https://myaccount.google.com/apppasswords> → đặt tên bất kỳ (ví dụ `tu-luyen-thi`) → **Tạo** → Google hiện 16 ký tự dạng `abcd efgh ijkl mnop`. **Chép ngay**, đóng cửa sổ là không xem lại được.
+4. Điền vào `backend/.env` (máy bạn) **và** *Vercel → Settings → Environment Variables*:
+   ```ini
+   MAIL_USER=ten.ban@gmail.com
+   MAIL_PASS=abcdefghijklmnop
+   ```
+   (Không đặt `MAIL_HOST`/`MAIL_PORT` thì mặc định đã là Gmail `smtp.gmail.com:465`.)
+5. **Redeploy** Vercel (*Deployments → ⋯ → Redeploy*) vì Vercel chỉ đọc biến mới sau khi deploy lại. Lần đầu sau khi thêm `nodemailer` vào `package.json`, Vercel sẽ tự cài thư viện khi build.
+6. Thử: mở trang → **Đăng ký** → điền email thật → bấm *Gửi mã xác minh* → mở hộp thư (xem cả mục **Spam**) lấy mã 6 số → nhập vào → tạo xong tài khoản.
+
+Cách hoạt động: đăng ký gồm 2 bước. Bước 1 chưa tạo tài khoản, chỉ lưu bản chờ (mã được **băm**, hết hạn sau 10 phút, tối đa 5 lần thử sai) trong repo `-account`. Bước 2 nhập đúng mã mới tạo tài khoản. Mỗi email chỉ dùng cho 1 tài khoản. Có **Quên mật khẩu** (mã OTP gửi về email, đổi xong mọi thiết bị bị đăng xuất).
+
+Gmail miễn phí gửi được khoảng 500 thư/ngày, đủ cho lớp học. Cần nhiều hơn thì dùng Brevo/SendGrid và đặt `MAIL_HOST`, `MAIL_PORT`, `MAIL_USER`, `MAIL_PASS` theo nhà cung cấp đó.
+
+> **Tài khoản cũ** (tạo trước khi có OTP) vẫn đăng nhập bằng tên + mật khẩu bình thường nhưng chưa có email, nên chưa dùng được "Quên mật khẩu".
+> **Muốn tắt OTP** (ví dụ chạy thử trên máy): đặt `REQUIRE_EMAIL_OTP=false`.
 
 ### Mẫu file `backend/.env` (điền thay các chỗ `...`)
 
@@ -120,6 +156,9 @@ CRON_SECRET=dán-chuỗi-bí-mật-4-dài-96-ký-tự
 
 FRONTEND_ORIGINS=https://TEN_GITHUB.github.io
 PUBLIC_API_URL=https://TEN_PROJECT.vercel.app
+
+MAIL_USER=ten.ban@gmail.com
+MAIL_PASS=mat-khau-ung-dung-16-ky-tu
 ```
 Các dòng tuỳ chọn khác trong `.env.example` có thể để nguyên hoặc xoá.
 
@@ -311,6 +350,11 @@ Backend trên máy vẫn dùng **GitHub thật** (cần token và repo), nên v�
 | Push bị GitHub chặn ("Push cannot contain secrets") | Bạn đang đứng trong `backend` hoặc đã `git add` file `backend/.env`. Xoá thư mục `.git` đã tạo nhầm, vào thư mục gốc rồi `git init` lại (xem bước 0.1) |
 | Không chọn được Pages cho repo | Repo đang Private trên gói miễn phí: chuyển Public (repo mã nguồn không chứa bí mật) |
 | Tải ảnh báo quá lớn | Giới hạn 4MB/ảnh (payload Vercel); ảnh lớn được nén tự động ở trình duyệt |
+| Bấm "Gửi mã xác minh" báo 502 "Máy chủ gửi mail bị từ chối đăng nhập" | `MAIL_PASS` sai: phải là **mật khẩu ứng dụng** 16 ký tự (không phải mật khẩu Gmail), và Gmail phải đã bật Xác minh 2 bước. Sửa xong Redeploy |
+| Báo 502 "Không gửi được email" | Gmail tạm chặn/giới hạn, hoặc `MAIL_HOST`/`MAIL_PORT` sai. Xem *Vercel → Logs*, dòng bắt đầu bằng `[mail]` |
+| Báo 503 "chưa cấu hình gửi email", hoặc `/api/health` có `warnings` nhắc MAIL | Chưa đặt `MAIL_USER`/`MAIL_PASS` trên Vercel (hoặc chưa Redeploy). Muốn tắt OTP: `REQUIRE_EMAIL_OTP=false` |
+| Không thấy thư | Xem mục **Spam/Quảng cáo**; chờ 1 phút rồi bấm *Gửi lại mã* |
+| Đăng ký cũ báo 403 `OTP_REQUIRED` | Đang gọi API đăng ký cũ. Dùng trang web bản mới (có ô Email), hoặc đặt `REQUIRE_EMAIL_OTP=false` |
 | Ảnh hoặc Gemini key cũ không đọc được | `ENCRYPTION_KEY` đã bị đổi so với lúc lưu. Đặt lại đúng giá trị cũ |
 | Lần đầu mở chậm ~10 giây | Vercel khởi động hàm (cold start); trang sẽ hiện "máy chủ đang khởi động" rồi tự tải |
 | Cron prune báo 401/503 | `CRON_SECRET` chưa đặt hoặc chưa Redeploy |
