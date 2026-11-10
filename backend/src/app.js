@@ -89,6 +89,13 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl }
   router.get('/api/me/vault', async (ctx) => ({ ok: true, vault: await content.readVault(authed(ctx).sub) }));
   router.put('/api/me/vault', async (ctx) => ({ ok: true, vault: await content.writeVault(authed(ctx).sub, ctx.body) }));
 
+  // ── AI: danh sách nhà cung cấp/model + thử kết nối bằng key của chính người dùng ──
+  router.get('/api/ai/providers', async (ctx) => { authed(ctx); return { ok: true, providers: content.aiProviders() }; });
+  router.post('/api/ai/test', async (ctx) => {
+    const a = authed(ctx); if (!allow('aitest:' + a.sub, 20, 3600e3)) throw new HttpError(429, 'Thử kết nối AI quá nhiều lần trong 1 giờ', 'RATE');
+    return { ok: true, result: await content.testAi(a.sub, { provider: ctx.body.provider, model: ctx.body.model }) };
+  });
+
   // ── Bài tập ──
   router.get('/api/overview', async (ctx) => ({ ok: true, ...(await content.overview(authed(ctx).sub)) }));
   router.post('/api/reindex', async (ctx) => { await content.reindex(authed(ctx).sub); return { ok: true, ...(await content.overview(authed(ctx).sub)) }; });
@@ -111,7 +118,12 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl }
   router.patch('/api/submissions/:id', async (ctx) => ({ ok: true, submission: await content.selfGrade(authed(ctx).sub, ctx.params.id, ctx.body) }));
   router.post('/api/submissions/:id/ai-grade', async (ctx) => {
     const a = authed(ctx); if (!allow('ai:' + a.sub, 15, 3600e3)) throw new HttpError(429, 'Chấm AI quá nhiều lần trong 1 giờ', 'RATE');
-    return { ok: true, submission: await content.aiGrade(a.sub, ctx.params.id) };
+    return { ok: true, submission: await content.aiGrade(a.sub, ctx.params.id, { provider: ctx.body.provider, model: ctx.body.model }) };
+  });
+  router.post('/api/submissions/:id/ai-analyze', async (ctx) => {
+    const a = authed(ctx); if (!allow('ai:' + a.sub, 15, 3600e3)) throw new HttpError(429, 'Dùng AI quá nhiều lần trong 1 giờ', 'RATE');
+    const u = await auth.me(a);
+    return { ok: true, submission: await content.aiAnalyze(a.sub, ctx.params.id, { provider: ctx.body.provider, model: ctx.body.model, studentName: u.displayName }) };
   });
   router.delete('/api/submissions/:id', async (ctx) => { await content.deleteSubmission(authed(ctx).sub, ctx.params.id); return { ok: true }; });
 

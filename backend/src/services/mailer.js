@@ -26,7 +26,7 @@ function createMailer(cfg) {
   async function send({ to, subject, text, html }) {
     if (!configured) throw new HttpError(503, 'Máy chủ chưa cấu hình gửi email (MAIL_USER / MAIL_PASS)', 'MAIL_NOT_CONFIGURED');
     try {
-      await get().sendMail({ from: m.from || `"Tự luyện thi CNTT UTC" <${m.user}>`, to, subject, text, html });
+      await get().sendMail({ from: m.from || `"Tự luyện thi của mnha" <${m.user}>`, to, subject, text, html });
     } catch (e) {
       console.error('[mail]', e && e.code, e && e.message);
       const bad = e && (e.code === 'EAUTH' || e.responseCode === 535);
@@ -40,10 +40,10 @@ function createMailer(cfg) {
 /** Nội dung thư OTP (HTML + text). purpose: 'register' | 'reset' */
 function otpMessage(code, purpose, ttlMin) {
   const title = purpose === 'reset' ? 'Mã đặt lại mật khẩu' : 'Mã xác minh đăng ký';
-  const subject = `${title} — Tự luyện thi CNTT UTC`;
+  const subject = `${title} — Tự luyện thi của mnha`;
   const text = `${title}: ${code}\nMã có hiệu lực ${ttlMin} phút. Không chia sẻ mã này với bất kỳ ai.\nNếu không phải bạn yêu cầu, hãy bỏ qua email này.`;
   const html = `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
-<h2 style="color:#2563eb;margin:0 0 12px">Tự luyện thi CNTT UTC</h2>
+<h2 style="color:#2563eb;margin:0 0 12px">Tự luyện thi của mnha</h2>
 <p>${esc(title)} của bạn là:</p>
 <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#1d4ed8;padding:16px;background:#eff6ff;border-radius:8px;text-align:center;margin:16px 0">${esc(code)}</div>
 <p>Mã có hiệu lực trong <b>${ttlMin} phút</b>. Không chia sẻ mã này với bất kỳ ai.</p>

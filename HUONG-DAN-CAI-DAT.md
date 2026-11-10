@@ -54,7 +54,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 Ghi lại thành 4 giá trị cho `JWT_SECRET`, `ENCRYPTION_KEY`, `GITHUB_WEBHOOK_SECRET`, `CRON_SECRET`.
 
-⚠️ **Cất kỹ `ENCRYPTION_KEY`** (ví dụ trong trình quản lý mật khẩu). Mất hoặc đổi nó thì toàn bộ ảnh và Gemini key đã lưu **không giải mã được nữa**. Đổi `JWT_SECRET` thì mọi người bị đăng xuất (không mất dữ liệu).
+⚠️ **Cất kỹ `ENCRYPTION_KEY`** (ví dụ trong trình quản lý mật khẩu). Mất hoặc đổi nó thì toàn bộ ảnh và API key AI đã lưu **không giải mã được nữa**. Đổi `JWT_SECRET` thì mọi người bị đăng xuất (không mất dữ liệu).
 
 ---
 
@@ -106,7 +106,7 @@ Cùng một danh sách biến được dùng ở 3 nơi, tuỳ cách bạn chọ
 | `REGISTRATION_OPEN` | `true` | Đặt `false` để đóng đăng ký (đăng ký xong hết người cần rồi đóng lại) |
 | `INVITE_CODE` | (trống) | Đặt một mã nếu muốn ai đăng ký cũng phải nhập mã mời |
 | `PRUNE_DAYS` / `PRUNE_MAX_REPLAY` | `5` / `150` | Dọn commit sau 5 ngày, giữ tối đa 150 commit mới nhất |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Model chấm tự luận. Mỗi tài khoản tự nhập Gemini key trong trang Cài đặt |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Model Gemini mặc định khi chấm tự luận. Mỗi tài khoản tự chọn nhà cung cấp/model và nhập API key riêng trong Cài đặt → Kết nối AI |
 | `REQUIRE_EMAIL_OTP` | `true` | `true`: đăng ký phải nhập mã OTP gửi về email. `false`: tắt OTP, đăng ký thẳng bằng tên + mật khẩu (không cần `MAIL_*`) |
 | `MAIL_HOST` / `MAIL_PORT` / `MAIL_SECURE` | `smtp.gmail.com` / `465` / `true` | Chỉ đổi khi dùng nhà cung cấp mail khác (Brevo, SendGrid, Mailgun…) |
 | `MAIL_FROM` | (trống) | Tên hiển thị ở người gửi, ví dụ `"Tự luyện thi" <ten.ban@gmail.com>`. Trống = tự lấy từ `MAIL_USER` |
@@ -245,7 +245,7 @@ Trang dùng đường dẫn dạng `#/...` (ví dụ `.../tu-luyen-thi-cntt-utc-
 
 1. Mở trang Pages → **Đăng ký** → tạo bài tự luận / trắc nghiệm → làm bài → xem lịch sử.
 2. **Cài đặt → 🩺 Kiểm tra kết nối** → phải ra `"ok": true`.
-3. (Tuỳ chọn) Trong **Cài đặt**, dán Gemini API key của bạn để dùng chấm tự luận bằng AI.
+3. (Tuỳ chọn) Trong **Cài đặt**, vào **Kết nối AI**, chọn nhà cung cấp (Gemini, vilao.ai, ChatGPT, DeepSeek, OpenRouter) + model, dán API key của bạn rồi bấm **Kiểm tra kết nối AI** để dùng chấm tự luận bằng AI.
 4. Kiểm tra dữ liệu: repo `…-account` có `users/<tên>.json` (mật khẩu là chuỗi băm bcrypt), repo `…-data` có `u/<id>/…`.
 
 ### E. Dọn commit repo `-account` sau 5 ngày
@@ -357,7 +357,7 @@ Backend trên máy vẫn dùng **GitHub thật** (cần token và repo), nên v�
 | Báo 503 "chưa cấu hình gửi email", hoặc `/api/health` có `warnings` nhắc MAIL | Chưa đặt `MAIL_USER`/`MAIL_PASS` trên Vercel (hoặc chưa Redeploy). Muốn tắt OTP: `REQUIRE_EMAIL_OTP=false` |
 | Không thấy thư | Xem mục **Spam/Quảng cáo**; chờ 1 phút rồi bấm *Gửi lại mã* |
 | Đăng ký cũ báo 403 `OTP_REQUIRED` | Đang gọi API đăng ký cũ. Dùng trang web bản mới (có ô Email), hoặc đặt `REQUIRE_EMAIL_OTP=false` |
-| Ảnh hoặc Gemini key cũ không đọc được | `ENCRYPTION_KEY` đã bị đổi so với lúc lưu. Đặt lại đúng giá trị cũ |
+| Ảnh hoặc API key AI cũ không đọc được | `ENCRYPTION_KEY` đã bị đổi so với lúc lưu. Đặt lại đúng giá trị cũ |
 | Lần đầu mở chậm ~10 giây | Vercel khởi động hàm (cold start); trang sẽ hiện "máy chủ đang khởi động" rồi tự tải |
 | Cron prune báo 401/503 | `CRON_SECRET` chưa đặt hoặc chưa Redeploy |
 | Chạy thử trên máy bị CORS | Quên `ALLOW_LOCALHOST=true`, hoặc `FRONTEND_ORIGINS` không khớp cổng bạn đang mở (ví dụ `http://localhost:8080`) |

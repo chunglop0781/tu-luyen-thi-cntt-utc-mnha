@@ -21,7 +21,17 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
   const gh = new FakeGitHub('me');
   for (const r of ['tu-luyen-thi-cntt-utc-mnha-account', 'tu-luyen-thi-cntt-utc-mnha-data']) gh.ensure(r);
   let aiReply = { score: 7, feedback: 'Tốt', strengths: ['a'], weaknesses: ['b'] };
-  const aiFetch = async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(aiReply) }] } }] }), { status: 200 });
+  const aiCalls = []; let aiFail = null;
+  const aiFetch = async (url, init) => {
+    const body = JSON.parse(init.body); aiCalls.push({ url: String(url), headers: init.headers, body });
+    if (aiFail) return new Response(JSON.stringify(aiFail.body), { status: aiFail.status });
+    if (String(url).includes('chat/completions')) {
+      const asked = body.messages[1].content; const text = /only with the word OK/.test(asked) ? 'OK' : '```json\n' + JSON.stringify(aiReply) + '\n```';
+      return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { status: 200 });
+    }
+    const asked = body.contents[0].parts[0].text;
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: /only with the word OK/.test(asked) ? 'OK' : JSON.stringify(aiReply) }] } }] }), { status: 200 });
+  };
   const outbox = []; let mailFail = false;     // hộp thư giả: test đọc mã OTP từ đây
   const mailer = { configured: true, send: async (m) => { if (mailFail) { const { HttpError } = require('../src/http'); throw new HttpError(502, 'Không gửi được email, thử lại sau', 'MAIL_FAILED'); } outbox.push(m); } };
   const lastCode = (to) => { const m = [...outbox].reverse().find((x) => x.to === to); return m && /(\d{6})/.exec(m.text)[1]; };
@@ -95,7 +105,7 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.equal(w.status, 400); assert.equal(w.json.code, 'OTP_WRONG'); assert.match(w.json.error, /còn 4 lần/);
     assert.equal((await call('POST', '/api/auth/register/verify', { body: { email: 'dave@example.com', code: 'abc' } })).status, 400);
     const ok = await call('POST', '/api/auth/register/verify', { body: { email: 'dave@example.com', code: lastCode('dave@example.com') } });
-    assert.equal(ok.status, 201); assert.equal(ok.json.user.username, 'dave'); assert.equal(ok.json.user.email, 'da**@example.com');
+    assert.equal(ok.status, 201); assert.equal(ok.json.user.username, 'dave'); assert.equal(ok.json.user.email, 'dave@example.com');
     assert.equal(JSON.parse(gh.file('tu-luyen-thi-cntt-utc-mnha-account', 'users/dave.json')).email, 'dave@example.com');
     assert.equal((await call('POST', '/api/auth/login', { body: { username: 'dave', password: 'matkhau123' } })).status, 200);
     // mã đã dùng không dùng lại được
@@ -222,6 +232,77 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     const v = await call('PUT', '/api/me/vault', { token: A.accessToken, body: { geminiKey: 'AIza-secret-key', notes: 'riêng tư' } }); assert.equal(v.json.vault.geminiKeySet, true); assert.ok(!JSON.stringify(v.json).includes('AIza'));
     assert.ok(!gh.file('tu-luyen-thi-cntt-utc-mnha-account', `private/${A.user.id}/vault.json`).toString().includes('AIza-secret-key'));
     const ai = await call('POST', `/api/submissions/${sid}/ai-grade`, { token: A.accessToken }); assert.equal(ai.status, 200); assert.equal(ai.json.submission.ai.score, 7); assert.equal(ai.json.submission.score, 8);
+  });
+  await t('AI nhiều nhà cung cấp: danh sách model, key riêng từng nhà, thử kết nối, chấm bằng vilao.ai / DeepSeek', async () => {
+    const pr = await call('GET', '/api/ai/providers', { token: A.accessToken }); assert.equal(pr.status, 200);
+    const ids = pr.json.providers.map((x) => x.id); for (const id of ['gemini', 'vilao', 'openai', 'deepseek', 'openrouter']) assert.ok(ids.includes(id), id);
+    assert.ok(pr.json.providers.find((x) => x.id === 'gemini').models.includes('gemini-2.5-flash')); assert.ok(!JSON.stringify(pr.json).includes('api.vilao.ai'));
+    assert.equal((await call('GET', '/api/ai/providers')).status, 401);
+    const sid = rid(); await call('PUT', `/api/submissions/${sid}`, { token: A.accessToken, body: { itemType: 'essay', itemId: essayId, text: 'UDP không đảm bảo, TCP đảm bảo.' } });
+    // chưa có key vilao → 400, không gọi AI
+    const n0 = aiCalls.length; assert.equal((await call('POST', '/api/ai/test', { token: A.accessToken, body: { provider: 'vilao' } })).status, 400); assert.equal(aiCalls.length, n0);
+    // model Gemini gửi cho vilao / tên rác → từ chối khi lưu
+    assert.equal((await call('PUT', '/api/me/vault', { token: A.accessToken, body: { providers: { vilao: { model: 'gemini-2.5-flash' } } } })).status, 400);
+    assert.equal((await call('PUT', '/api/me/vault', { token: A.accessToken, body: { providers: { vilao: { model: 'a b;c' } } } })).status, 400);
+    assert.equal((await call('PUT', '/api/me/vault', { token: A.accessToken, body: { providers: { evil: { key: 'sk-12345678' } } } })).status, 400);
+    assert.equal((await call('PUT', '/api/me/vault', { token: A.accessToken, body: { providers: { vilao: { key: 'sk- co khoang trang' } } } })).status, 400);
+    const v = await call('PUT', '/api/me/vault', { token: A.accessToken, body: { provider: 'vilao', providers: { vilao: { key: 'sk-vilao-secret-1', model: 'gpt-4o' }, deepseek: { key: 'sk-deep-secret-2' } } } });
+    assert.equal(v.status, 200); assert.equal(v.json.vault.provider, 'vilao'); assert.equal(v.json.vault.items.vilao.keySet, true); assert.equal(v.json.vault.items.vilao.model, 'gpt-4o'); assert.equal(v.json.vault.items.gemini.keySet, true);
+    assert.ok(!JSON.stringify(v.json).includes('secret'));
+    const raw = gh.file('tu-luyen-thi-cntt-utc-mnha-account', `private/${A.user.id}/vault.json`).toString(); assert.ok(!raw.includes('vilao-secret') && !raw.includes('deep-secret') && !raw.includes('AIza-secret'));
+    // thử kết nối: đúng URL cố định, Bearer, model đã lưu
+    const tr = await call('POST', '/api/ai/test', { token: A.accessToken, body: {} }); assert.equal(tr.status, 200, JSON.stringify(tr.json));
+    assert.equal(tr.json.result.provider, 'vilao'); assert.equal(tr.json.result.model, 'gpt-4o'); assert.equal(tr.json.result.response, 'OK');
+    const last = aiCalls[aiCalls.length - 1]; assert.equal(last.url, 'https://api.vilao.ai/v1/chat/completions'); assert.equal(last.headers.Authorization, 'Bearer sk-vilao-secret-1'); assert.equal(last.body.model, 'gpt-4o');
+    // chấm bài bằng DeepSeek (chọn riêng cho lần này), JSON bọc ``` vẫn đọc được
+    const g = await call('POST', `/api/submissions/${sid}/ai-grade`, { token: A.accessToken, body: { provider: 'deepseek', model: 'deepseek-chat' } }); assert.equal(g.status, 200, JSON.stringify(g.json));
+    assert.equal(g.json.submission.ai.provider, 'deepseek'); assert.equal(g.json.submission.ai.model, 'deepseek-chat'); assert.equal(g.json.submission.ai.score, 7);
+    assert.equal(aiCalls[aiCalls.length - 1].url, 'https://api.deepseek.com/chat/completions');
+    // mặc định theo Cài đặt (vilao)
+    const g2 = await call('POST', `/api/submissions/${sid}/ai-grade`, { token: A.accessToken }); assert.equal(g2.json.submission.ai.provider, 'vilao');
+    // lỗi nhà cung cấp: 401/403 KHÔNG được trả 401 (sẽ làm đăng xuất nhầm); 429 → 429; 5xx → 502
+    aiFail = { status: 401, body: { error: { message: 'bad key' } } }; let r = await call('POST', '/api/ai/test', { token: A.accessToken, body: {} }); assert.equal(r.status, 400); assert.equal(r.json.code, 'AI_KEY');
+    aiFail = { status: 403, body: { error: { message: 'Please subscribe to model in the API Key: gpt-4o' } } }; r = await call('POST', '/api/ai/test', { token: A.accessToken, body: {} }); assert.equal(r.status, 400); assert.equal(r.json.code, 'AI_MODEL');
+    aiFail = { status: 429, body: { error: { message: 'quota' } } }; r = await call('POST', '/api/ai/test', { token: A.accessToken, body: {} }); assert.equal(r.status, 429);
+    aiFail = { status: 500, body: { error: 'oops' } }; r = await call('POST', '/api/ai/test', { token: A.accessToken, body: {} }); assert.equal(r.status, 502);
+    // Gemini quá tải 503 → tự chuyển model dự phòng
+    aiFail = { status: 503, body: { error: { message: 'overloaded' } } }; const n1 = aiCalls.length; r = await call('POST', '/api/ai/test', { token: A.accessToken, body: { provider: 'gemini' } }); assert.equal(r.status, 502); assert.equal(aiCalls.length - n1, 3);
+    aiFail = null;
+    // xoá key một nhà cung cấp; khoá riêng nhà khác còn nguyên
+    const d = await call('PUT', '/api/me/vault', { token: A.accessToken, body: { providers: { vilao: { key: '' } } } }); assert.equal(d.json.vault.items.vilao.keySet, false); assert.equal(d.json.vault.items.deepseek.keySet, true);
+    assert.equal((await call('POST', `/api/submissions/${sid}/ai-grade`, { token: A.accessToken })).status, 400);
+    // tài khoản khác không dùng được key của alice
+    assert.equal((await call('POST', '/api/ai/test', { token: B.accessToken, body: { provider: 'deepseek' } })).status, 400);
+  });
+  await t('Phân tích AI trắc nghiệm: prompt rút gọn câu đúng, lưu aiAnalyses, giới hạn lần/giãn cách, chỉ trắc nghiệm', async () => {
+    const q = (await call('GET', `/api/quizzes/${quizId}`, { token: A.accessToken })).json.item.questions;
+    const sid = rid(); const sub = await call('PUT', `/api/submissions/${sid}`, { token: A.accessToken, body: { itemType: 'quiz', itemId: quizId, answers: { [q[0].id]: q[0].options.find((o) => !q[0].correct.includes(o.id)).id } } }); assert.equal(sub.status, 200);
+    const nq = sub.json.submission.snapshot.length;
+    const prev = aiReply;
+    aiReply = { summary: 'Hơi yếu mạng', weakTopics: [{ topic: 'Mạng', wrongCount: 1, questions: [1, 99], advice: 'Ôn TCP' }], mistakes: [{ q: 1, why: 'nhầm', correctReasoning: 'đúng là X', tip: 'nhớ' }, { q: 999, why: 'rác' }], studyPlan: ['Đọc lại chương 3'] };
+    try {
+      const n0 = aiCalls.length;
+      const r = await call('POST', `/api/submissions/${sid}/ai-analyze`, { token: A.accessToken, body: { provider: 'deepseek', model: 'deepseek-chat' } }); assert.equal(r.status, 200, JSON.stringify(r.json));
+      const a = r.json.submission.aiAnalyses; assert.equal(a.length, 1); assert.equal(a[0].provider, 'deepseek'); assert.equal(a[0].model, 'deepseek-chat');
+      assert.deepEqual(a[0].result.weakTopics[0].questions, [1]); assert.equal(a[0].result.mistakes.length, 1); assert.equal(a[0].result.mistakes[0].q, 1); assert.equal(a[0].result.summary, 'Hơi yếu mạng');
+      const sent = aiCalls[aiCalls.length - 1].body.messages[1].content; assert.equal(aiCalls.length - n0, 1);
+      assert.ok(sent.includes('[SAI] Câu 1')); assert.ok(sent.includes('Đáp án đúng:')); assert.ok(sent.includes('<<<ĐỀ VÀ BÀI LÀM'));
+      assert.equal((sent.match(/\[SAI\] Câu/g) || []).length + (sent.match(/\[ĐÚNG\] Câu/g) || []).length, nq);
+      // giãn cách 30 giây giữa hai lần
+      assert.equal((await call('POST', `/api/submissions/${sid}/ai-analyze`, { token: A.accessToken, body: { provider: 'deepseek' } })).json.code, 'COOLDOWN');
+      // đủ 5 lần thì chặn
+      const real = Date.now; let t0 = real(); try { for (let i = 0; i < 4; i++) { t0 += 40000; Date.now = () => t0; assert.equal((await call('POST', `/api/submissions/${sid}/ai-analyze`, { token: A.accessToken, body: { provider: 'deepseek' } })).status, 200); }
+        t0 += 40000; Date.now = () => t0; assert.equal((await call('POST', `/api/submissions/${sid}/ai-analyze`, { token: A.accessToken, body: { provider: 'deepseek' } })).json.code, 'LIMIT'); } finally { Date.now = real; }
+      // AI trả rác → 502, không lưu
+      const sid2 = rid(); await call('PUT', `/api/submissions/${sid2}`, { token: A.accessToken, body: { itemType: 'quiz', itemId: quizId, answers: {} } });
+      aiReply = { foo: 1 }; assert.equal((await call('POST', `/api/submissions/${sid2}/ai-analyze`, { token: A.accessToken, body: { provider: 'deepseek' } })).json.code, 'AI_FORMAT');
+      assert.equal(((await call('GET', `/api/submissions/${sid2}`, { token: A.accessToken })).json.submission.aiAnalyses || []).length, 0);
+      // người khác không phân tích được bài của mình; tự luận bị từ chối
+      assert.equal((await call('POST', `/api/submissions/${sid}/ai-analyze`, { token: B.accessToken, body: {} })).status, 404);
+      const es = rid(); await call('PUT', `/api/submissions/${es}`, { token: A.accessToken, body: { itemType: 'essay', itemId: essayId, text: 'abc' } });
+      assert.equal((await call('POST', `/api/submissions/${es}/ai-analyze`, { token: A.accessToken, body: {} })).json.code, 'BAD_TYPE');
+      assert.equal((await call('POST', `/api/submissions/${sid}/ai-analyze`, { body: {} })).status, 401);
+    } finally { aiReply = prev; }
   });
   await t('xoá bài nộp & bài; index cập nhật', async () => {
     const list = (await call('GET', '/api/submissions', { token: A.accessToken })).json.submissions;

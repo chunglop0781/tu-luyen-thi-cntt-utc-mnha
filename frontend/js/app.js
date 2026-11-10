@@ -33,10 +33,11 @@ function renderTop() {
   const link = (href, text) => h('a', { href, class: cur === href ? 'on' : '' }, text);
   top.hidden = !s;                                  // chưa đăng nhập: trang đăng nhập tự có logo riêng
   top.replaceChildren(
-    h('a', { class: 'brand', href: '#/' }, logo(), h('div', null, h('b', null, 'Tự luyện thi'), h('small', null, 'CNTT · UTC'))),
+    h('a', { class: 'brand', href: '#/' }, logo(), h('div', null, h('b', null, 'Tự luyện thi của mnha'))),
     s ? h('nav', null,
       link('#/', 'Bài của tôi'), link('#/history', 'Lịch sử'), link('#/settings', 'Cài đặt'),
-      h('span', { class: 'me' }, h('span', { class: 'avatar' }, (s.user.displayName || s.user.username || '?').trim().charAt(0).toUpperCase()),
+      h('span', { class: 'me' }, h('span', { class: 'avatar' }, (s.user.email || s.user.displayName || s.user.username || '?').trim().charAt(0).toUpperCase()),
+        h('span', { class: 'who', title: s.user.email || s.user.username }, s.user.email || s.user.username),   // email đăng nhập; tài khoản cũ chưa có email thì hiện tên đăng nhập
         h('button', { class: 'btn small ghost', onclick: async () => { await logout(); go('/login'); } }, 'Đăng xuất'))) : null,
   );
 }

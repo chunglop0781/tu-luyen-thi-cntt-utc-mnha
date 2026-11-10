@@ -5,10 +5,15 @@ const { nowIso, isId, mapLimit } = require('../util');
 const { sanitizeEssay, sanitizeQuiz, imageRefs } = require('./validate');
 const { gradeQuiz, suggestEssay } = require('./grading');
 const { gradeEssay } = require('./gemini');
+const { callAi } = require('./ai');
+const { analyzeQuiz } = require('./analysis');
+const { providers, getProvider, safeModel, publicList } = require('../aiModels');
 const { encryptText, decryptText, deriveKey } = require('../crypto');
 
 const TYPES = { essay: 'essays', quiz: 'quizzes' };
 const MAX_SUBS_IN_INDEX = 1000;
+const MAX_ANALYSES = 5;            // số lần phân tích AI tối đa cho mỗi bài nộp trắc nghiệm
+const ANALYSIS_COOLDOWN_MS = 30000; // giãn cách giữa 2 lần phân tích của cùng một bài nộp
 
 function createContent({ cfg, store, images, fetchImpl }) {
   const base = (uid) => `u/${uid}`;
@@ -148,16 +153,54 @@ function createContent({ cfg, store, images, fetchImpl }) {
     return next;
   }
 
-  async function aiGrade(uid, id) {
+  /** Chọn nhà cung cấp + model + key để gọi AI (mặc định theo Cài đặt; có thể chọn riêng cho từng lần). */
+  async function resolveAi(uid, wanted = {}) {
+    const v = await readVault(uid, true);
+    const p = getProvider(cfg, wanted.provider || v.provider);
+    if (!p) throw new HttpError(400, 'Nhà cung cấp AI không hợp lệ', 'AI_PROVIDER');
+    const apiKey = v.keys[p.id];
+    if (!apiKey) throw new HttpError(400, `Chưa lưu API key ${p.label} trong Cài đặt`, 'NO_AI_KEY');
+    const asked = typeof wanted.model === 'string' ? wanted.model.trim() : '';
+    if (asked && safeModel(p, asked) !== asked) throw new HttpError(400, `Model "${asked}" không dùng được với ${p.label}`, 'AI_MODEL');
+    return { provider: p, apiKey, model: safeModel(p, asked || v.items[p.id].model) };
+  }
+
+  /** Thử kết nối AI bằng một câu hỏi rất ngắn. */
+  async function testAi(uid, wanted) {
+    const { provider, apiKey, model } = await resolveAi(uid, wanted);
+    const t0 = Date.now();
+    const r = await callAi({ provider, model, apiKey, prompt: 'Reply only with the word OK.', fetchImpl, timeoutMs: 12000, budgetMs: 40000 });
+    return { provider: provider.id, label: provider.label, model: r.model, response: r.text.trim().slice(0, 60), ms: Date.now() - t0, ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}) };
+  }
+
+  async function aiGrade(uid, id, wanted = {}) {
     const sub = await getSubmission(uid, id);
     if (sub.type !== 'essay') throw new HttpError(400, 'Chỉ bài tự luận mới chấm AI', 'BAD_TYPE');
-    const v = await readVault(uid, true);
-    if (!v.geminiKey) throw new HttpError(400, 'Chưa lưu Gemini API key trong Cài đặt', 'NO_AI_KEY');
+    const { provider, apiKey, model } = await resolveAi(uid, wanted);
     const essay = { prompt: sub.snapshot.prompt, modelAnswer: sub.snapshot.modelAnswer, rubric: sub.snapshot.rubric, maxScore: sub.snapshot.maxScore };
-    const ai = await gradeEssay({ apiKey: v.geminiKey, model: v.geminiModel || cfg.geminiModel, essay, answer: sub.text, fetchImpl });
+    const ai = await gradeEssay({ provider, apiKey, model, essay, answer: sub.text, fetchImpl });
     ai.at = nowIso();
     const next = await store.update('data', subPath(uid, id), (s) => { s.ai = ai; if (s.selfScore == null) s.score = ai.score; return s; }, { message: `ai-grade ${id}` });
     if (next.score != null) await patchIndexSub(uid, id, next.score, next.max);
+    return next;
+  }
+
+  /** Phân tích AI cho bài trắc nghiệm: lỗ hổng kiến thức, vì sao sai từng câu, kế hoạch ôn. Lưu vào sub.aiAnalyses. */
+  async function aiAnalyze(uid, id, wanted = {}) {
+    const sub = await getSubmission(uid, id);
+    if (sub.type !== 'quiz') throw new HttpError(400, 'Chỉ bài trắc nghiệm mới phân tích AI', 'BAD_TYPE');
+    const list = Array.isArray(sub.aiAnalyses) ? sub.aiAnalyses : [];
+    if (list.length >= MAX_ANALYSES) throw new HttpError(429, `Đã phân tích tối đa ${MAX_ANALYSES} lần cho bài nộp này`, 'LIMIT');
+    const last = list.length ? Date.parse(list[list.length - 1].at) : 0;
+    if (last && Date.now() - last < ANALYSIS_COOLDOWN_MS) throw new HttpError(429, `Vui lòng chờ ${Math.ceil((ANALYSIS_COOLDOWN_MS - (Date.now() - last)) / 1000)} giây rồi thử lại`, 'COOLDOWN');
+    const { provider, apiKey, model } = await resolveAi(uid, wanted);
+    const out = await analyzeQuiz({ provider, apiKey, model, sub, studentName: wanted.studentName, fetchImpl });
+    const entry = { id: `an_${Date.now()}`, at: nowIso(), ...out };
+    const next = await store.update('data', subPath(uid, id), (s) => {
+      const cur = Array.isArray(s.aiAnalyses) ? s.aiAnalyses : [];
+      if (cur.length >= MAX_ANALYSES) throw new HttpError(429, `Đã phân tích tối đa ${MAX_ANALYSES} lần cho bài nộp này`, 'LIMIT');
+      s.aiAnalyses = cur.concat([entry]); return s;
+    }, { message: `ai-analyze ${id}` });
     return next;
   }
 
@@ -169,22 +212,51 @@ function createContent({ cfg, store, images, fetchImpl }) {
 
   // ───────── Kho riêng tư (repo ACCOUNT) ─────────
   const vkey = () => deriveKey(cfg.encKey, 'vault');
+  const KEY_RE = /^[\x21-\x7e]{8,300}$/;
   async function readVault(uid, withSecret = false) {
     const r = await store.read('account', vaultPath(uid));
     const d = r ? r.data : {};
-    let geminiKey = '';
-    if (d.geminiKeyEnc) { try { geminiKey = decryptText(vkey(), d.geminiKeyEnc, uid); } catch { geminiKey = ''; } }
-    const out = { geminiModel: d.geminiModel || '', geminiKeySet: !!geminiKey, notes: d.notes || '', updatedAt: d.updatedAt || null };
-    if (withSecret) out.geminiKey = geminiKey;
+    const items = {}, keys = {};
+    for (const p of providers(cfg)) {
+      const enc = (d.keys && d.keys[p.id]) || (p.id === 'gemini' ? d.geminiKeyEnc : '');   // d.geminiKeyEnc: dữ liệu bản cũ
+      let key = '';
+      if (enc) { try { key = decryptText(vkey(), enc, uid); } catch { key = ''; } }
+      items[p.id] = { keySet: !!key, model: (d.models && d.models[p.id]) || (p.id === 'gemini' ? d.geminiModel : '') || '' };
+      if (key) keys[p.id] = key;
+    }
+    const provider = getProvider(cfg, d.provider) ? d.provider : 'gemini';
+    const out = { provider, items, geminiKeySet: items.gemini.keySet, geminiModel: items.gemini.model, notes: d.notes || '', updatedAt: d.updatedAt || null };
+    if (withSecret) out.keys = keys;
     return out;
   }
 
-  async function writeVault(uid, { geminiKey, geminiModel, notes }) {
+  /** Nhận { provider, providers: { <id>: { key?, model? } }, notes } — hoặc dạng cũ { geminiKey, geminiModel }. Key rỗng '' = xoá key. */
+  async function writeVault(uid, body = {}) {
+    const upd = {};
+    for (const [id, v] of Object.entries(body.providers && typeof body.providers === 'object' ? body.providers : {})) upd[id] = v && typeof v === 'object' ? v : {};
+    if (body.geminiKey !== undefined) upd.gemini = { ...(upd.gemini || {}), key: body.geminiKey };
+    if (body.geminiModel !== undefined) upd.gemini = { ...(upd.gemini || {}), model: body.geminiModel };
+    for (const [id, v] of Object.entries(upd)) {
+      const p = getProvider(cfg, id); if (!p) throw new HttpError(400, `Nhà cung cấp AI "${id}" không hợp lệ`, 'AI_PROVIDER');
+      if (v.key) { const k = String(v.key).trim(); if (!KEY_RE.test(k)) throw new HttpError(400, `API key ${p.label} không hợp lệ (8–300 ký tự, không có khoảng trắng)`, 'VALIDATION'); v.key = k; }
+      if (v.model !== undefined) {
+        const m = String(v.model || '').trim();
+        if (m && safeModel(p, m) !== m) throw new HttpError(400, `Model "${m}" không dùng được với ${p.label}`, 'AI_MODEL');
+        v.model = m;
+      }
+    }
+    if (body.provider !== undefined && !getProvider(cfg, body.provider)) throw new HttpError(400, 'Nhà cung cấp AI không hợp lệ', 'AI_PROVIDER');
     await store.update('account', vaultPath(uid), (d) => {
-      d = d || {};
-      if (geminiKey !== undefined) { if (geminiKey === '') delete d.geminiKeyEnc; else d.geminiKeyEnc = encryptText(vkey(), String(geminiKey).trim().slice(0, 200), uid); }
-      if (geminiModel !== undefined) d.geminiModel = String(geminiModel).trim().slice(0, 80);
-      if (notes !== undefined) d.notes = String(notes).slice(0, 5000);
+      d = d || {}; d.keys = d.keys || {}; d.models = d.models || {};
+      if (d.geminiKeyEnc && !d.keys.gemini) d.keys.gemini = d.geminiKeyEnc;       // chuyển dữ liệu bản cũ
+      if (d.geminiModel && d.models.gemini === undefined) d.models.gemini = d.geminiModel;
+      delete d.geminiKeyEnc; delete d.geminiModel;
+      for (const [id, v] of Object.entries(upd)) {
+        if (v.key !== undefined) { if (v.key === '' || v.key === null) delete d.keys[id]; else d.keys[id] = encryptText(vkey(), v.key, uid); }
+        if (v.model !== undefined) { if (v.model) d.models[id] = v.model; else delete d.models[id]; }
+      }
+      if (body.provider !== undefined) d.provider = String(body.provider).toLowerCase();
+      if (body.notes !== undefined) d.notes = String(body.notes).slice(0, 5000);
       d.updatedAt = nowIso();
       return d;
     }, { message: `vault ${uid}`, defaultValue: {} });
@@ -219,7 +291,7 @@ function createContent({ cfg, store, images, fetchImpl }) {
     return { exportedAt: nowIso(), items: items.filter(Boolean), submissions: subs.filter(Boolean) };
   }
 
-  return { overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, deleteSubmission, readVault, writeVault, reindex, exportAll, imageRefs };
+  return { overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders: () => publicList(cfg), reindex, exportAll, imageRefs };
 }
 
 module.exports = { createContent };

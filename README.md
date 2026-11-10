@@ -1,4 +1,4 @@
-# tu-luyen-thi-cntt-utc-mnha (bản theo từng tài khoản)
+# Tự luyện thi của mnha (tu-luyen-thi-cntt-utc-mnha — bản theo từng tài khoản)
 
 👉 **Cài đặt từng bước: xem [HUONG-DAN-CAI-DAT.md](HUONG-DAN-CAI-DAT.md)**
 
@@ -55,7 +55,7 @@ Giao diện (`index.html`, `404.html`, `config.js`, `css/`, `js/`, `img/`) nằm
 Trang **Cài đặt → Kiểm tra kết nối** chạy `/api/health?deep=1` ngay từ origin GitHub Pages.
 
 ## Bảo mật & dữ liệu
-- Mật khẩu: **bcryptjs** (băm một chiều, mặc định 10 vòng, tối đa 72 byte). Repo private nên không mã hoá thêm hồ sơ/bài; riêng **Gemini API key** vẫn mã hoá AES-GCM.
+- Mật khẩu: **bcryptjs** (băm một chiều, mặc định 10 vòng, tối đa 72 byte). Repo private nên không mã hoá thêm hồ sơ/bài; riêng **API key AI** (Gemini, vilao.ai, ChatGPT, DeepSeek, OpenRouter) vẫn mã hoá AES-GCM.
 - Ảnh: **AES-256-GCM**, khoá HKDF từ `ENCRYPTION_KEY`, AAD = id chủ tài khoản ⇒ người khác không giải mã được dù biết id. Không kiểm duyệt (không Cloudinary); chỉ kiểm tra đúng JPEG/PNG/GIF/WebP.
 - Ảnh tự sinh `…-image`, `…-image-1`, `…-image-2`… (private + gắn webhook). Giới hạn 200MB/repo (`IMAGE_REPO_LIMIT_MB`), chừa dự phòng 8MB (`IMAGE_REPO_RESERVE_MB`) nên thực tế chuyển repo ở ~192MB. Dung lượng theo dõi bằng sổ `images/pool.json` + `repository.size` từ webhook.
 - Webhook `POST /webhooks/github`: xác thực HMAC-SHA256 (`X-Hub-Signature-256`), nhận `ping`/`push`, làm mới cache các file vừa đổi, cập nhật dung lượng repo ảnh. Sai chữ ký → 401.
@@ -65,13 +65,22 @@ Trang **Cài đặt → Kiểm tra kết nối** chạy `/api/health?deep=1` nga
 - Chống dò mật khẩu/spam chỉ ở mức RAM từng instance (serverless không có bộ nhớ chung) — đủ cho dùng cá nhân/nhóm nhỏ.
 
 ## Tính năng
-Tạo/sửa/xoá bài tự luận (đề, đáp án mẫu, tiêu chí từ khoá, ảnh) và trắc nghiệm (nhập nhanh từ văn bản `Câu 1: … A. … Đáp án: B`, nhiều đáp án đúng, giải thích, đếm ngược, xáo câu, ảnh) · làm bài & chấm tự động trắc nghiệm · tự luận: gợi ý điểm theo từ khoá, tự chấm, chấm bằng Gemini bằng **key của chính bạn** · lịch sử bài nộp · xuất JSON · dựng lại chỉ mục.
-Không có trong bản này (so với bản cũ): MongoDB, admin/duyệt user, slide/video/flashcard/tài liệu, Cloudinary, OTP email.
+Tạo/sửa/xoá bài tự luận (đề, đáp án mẫu, tiêu chí từ khoá, ảnh) và trắc nghiệm (nhập nhanh từ văn bản `Câu 1: … A. … Đáp án: B`, nhiều đáp án đúng, giải thích, đếm ngược, xáo câu, ảnh) · làm bài & chấm tự động trắc nghiệm · tự luận: gợi ý điểm theo từ khoá, tự chấm, chấm bằng AI (Gemini / vilao.ai / ChatGPT / DeepSeek / OpenRouter) bằng **key của chính bạn** · trắc nghiệm: **Phân tích AI** (chủ đề hay sai, vì sao sai từng câu, kế hoạch ôn; tối đa 5 lần/bài nộp, giãn cách 30 giây) · lịch sử bài nộp · xuất JSON · dựng lại chỉ mục.
+Không có trong bản này (so với bản cũ): MongoDB, admin/duyệt user, slide/video/flashcard/tài liệu, Cloudinary.
+Thanh trên cùng hiện **email đăng nhập** (tài khoản cũ chưa có email thì hiện tên đăng nhập).
+
+## Kết nối AI (Cài đặt → Kết nối AI)
+- Chọn nhà cung cấp + model (danh sách lấy từ bản cũ `luyen-thi-cntt-utc-mnha`: Gemini 3.x/2.5/Gemma, vilao.ai, ChatGPT, DeepSeek, OpenRouter), dán **API key của riêng bạn**, bấm **Kiểm tra kết nối AI**. Mỗi nhà cung cấp giữ một key riêng (mã hoá AES-256-GCM, repo `-account` private); nhà đang chọn là mặc định khi chấm.
+- Ở trang bài nộp tự luận có thể chọn nhà cung cấp/model khác cho riêng lần chấm đó.
+- Địa chỉ API của từng nhà cung cấp do **máy chủ cố định** trong `backend/src/aiModels.js` (người dùng không nhập URL → không bị lợi dụng gửi request tới địa chỉ lạ). Muốn thêm nhà cung cấp kiểu OpenAI khác: thêm một dòng `kind: 'openai'` vào file đó.
+- Gemini quá tải (503/timeout) → tự thử tối đa 2 model dự phòng, trong ngân sách ~52 giây (Vercel giới hạn 60 giây/hàm).
+- Lỗi key sai/hết hạn mức trả về mã 400/429 (không bao giờ 401 để khỏi bị đăng xuất nhầm). Giới hạn: 15 lần chấm/phân tích AI và 20 lần thử kết nối mỗi giờ. Kết quả phân tích lưu trong bài nộp (`aiAnalyses`).
 
 ## Kiểm thử
 ```
 cd backend
-npm test            # 33 kịch bản tích hợp với GitHub giả lập (không cần mạng)
+npm test            # 45 kịch bản tích hợp với GitHub giả lập (không cần mạng)
 npm run test:e2e    # trình duyệt thật (Playwright): Pages-origin ↔ API-origin khác nhau
+npm run test:ui     # trình duyệt thật: nền trắng, tên mới, hiện/ẩn mật khẩu, Kết nối AI, chấm AI
 ```
 Sandbox khi kiểm thử không có mạng nên `bcryptjs` được thay bằng bản giả trong `backend/test/stubs` (cùng API `hash/compare`); **khi chạy thật Vercel cài `bcryptjs` thật** từ `package.json`. Thư mục `test/` không ảnh hưởng khi deploy.

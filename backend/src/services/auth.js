@@ -21,7 +21,7 @@ function createAuth({ cfg, store, mailer }) {
   // Băm giả để thời gian phản hồi khi "không có user" ≈ khi "sai mật khẩu".
   const dummyHash = bcrypt.hashSync('dummy-password-for-timing', cfg.bcryptRounds);
 
-  const publicUser = (u) => ({ id: u.id, username: u.username, displayName: u.displayName, createdAt: u.createdAt, ...(u.email ? { email: maskEmail(u.email) } : {}) });
+  const publicUser = (u) => ({ id: u.id, username: u.username, displayName: u.displayName, createdAt: u.createdAt, ...(u.email ? { email: u.email } : {}) });  // email của CHÍNH chủ tài khoản (hiện ở thanh trên cùng)
 
   function checkPassword(pw) {
     if (typeof pw !== 'string' || pw.length < 8) throw new HttpError(400, 'Mật khẩu tối thiểu 8 ký tự', 'WEAK_PASSWORD');

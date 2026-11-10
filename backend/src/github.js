@@ -94,7 +94,7 @@ class GitHub {
   async putFile(repo, path, buffer, { message, sha } = {}) {
     const r = await this.req('PUT', `${this.repoPath(repo)}/contents/${encPath(path)}`, {
       body: { message: message || `update ${path}`, content: buffer.toString('base64'), branch: this.branch, ...(sha ? { sha } : {}),
-        committer: { name: 'UTC Practice Bot', email: 'bot@users.noreply.github.com' } },
+        committer: { name: 'mnha Practice Bot', email: 'bot@users.noreply.github.com' } },
     });
     return { sha: r.body.content.sha, commit: r.body.commit && r.body.commit.sha };
   }
