@@ -30,7 +30,7 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
   try {
     await page.goto(B); await page.waitForSelector('.auth');
     console.log('Đăng ký / đăng nhập qua CORS');
-    await page.click('text=Đăng ký'); await page.fill('input[autocomplete=username]', 'sv01'); await page.fill('input[type=email]', 'sv01@example.com'); await page.fill('input[type=password]', 'matkhau-xin'); await page.fill('input[placeholder^="Tên hiển thị"]', 'Sinh viên 01');
+    await page.click('text=Đăng ký'); await page.fill('input[autocomplete=username]', 'sv01'); await page.fill('input[type=email]', 'sv01@example.com'); await page.fill('input[type=password]', 'matkhau-xin'); await page.fill('.auth .field:has-text("Tên hiển thị") input', 'Sinh viên 01');
     await page.click('button[type=submit]'); await page.waitForSelector('input.otp');   // bước nhập OTP
     await page.fill('input.otp', /(\d{6})/.exec(outbox[outbox.length - 1].text)[1]);
     await page.click('button[type=submit]'); await page.waitForSelector('text=Bài của tôi', { timeout: 15000 });
