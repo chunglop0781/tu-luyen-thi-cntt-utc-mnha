@@ -1,5 +1,5 @@
 import { get, put, post, uploadImage, newId } from '../api.js';
-import { h, action, toast, imagePickerButton, icon } from '../ui.js';
+import { h, action, toast, imagePickerButton } from '../ui.js';
 
 const field = (label, el, hint) => h('label', { class: 'field' }, h('span', null, label), el, hint ? h('small', { class: 'muted' }, hint) : null);
 
@@ -21,7 +21,7 @@ export async function essayEditor(ctx, id) {
     h('input', { placeholder: 'Tiêu chí', value: r.name, oninput: (ev) => { r.name = ev.target.value; } }),
     h('input', { type: 'number', min: 0, step: '0.5', class: 'pts', value: r.points, oninput: (ev) => { r.points = ev.target.value; } }),
     h('input', { class: 'grow', placeholder: 'Từ khoá, cách nhau dấu phẩy', value: r.keywords, oninput: (ev) => { r.keywords = ev.target.value; } }),
-    h('button', { type: 'button', class: 'btn small ghost danger', onclick: () => { rubric.splice(i, 1); drawRubric(); } }, icon('trash')))));
+    h('button', { type: 'button', class: 'btn small ghost danger', onclick: () => { rubric.splice(i, 1); drawRubric(); } }, '✕'))));
   drawRubric();
   const save = h('button', { class: 'btn primary', type: 'submit' }, 'Lưu bài');
   const form = h('form', { class: 'card stack' },
@@ -30,7 +30,7 @@ export async function essayEditor(ctx, id) {
     field('Đề bài', prompt), imagePickerButton(prompt, uploadImage),
     field('Đáp án mẫu', model), imagePickerButton(model, uploadImage),
     h('h3', null, 'Tiêu chí chấm (tuỳ chọn)'), h('p', { class: 'muted' }, 'Dùng để gợi ý điểm tự động theo từ khoá (không phân biệt hoa/thường, dấu).'), rbox,
-    h('button', { type: 'button', class: 'btn small', onclick: () => { rubric.push({ name: '', points: 1, keywords: '' }); drawRubric(); } }, h('span', { class: 'row', style: 'gap:.375rem;flex-wrap:nowrap' }, icon('plus'), 'Thêm tiêu chí')),
+    h('button', { type: 'button', class: 'btn small', onclick: () => { rubric.push({ name: '', points: 1, keywords: '' }); drawRubric(); } }, '＋ Thêm tiêu chí'),
     h('div', { class: 'row' }, save, h('a', { class: 'btn ghost', href: '#/' }, 'Huỷ')));
   form.addEventListener('submit', action(save, async () => {
     await put(`/api/essays/${id}`, { title: title.value, subject: subject.value, maxScore: Number(maxScore.value), prompt: prompt.value, modelAnswer: model.value, rubric: rubric.filter((r) => r.name.trim()) });
@@ -62,19 +62,19 @@ export async function quizEditor(ctx, id) {
         h('span', { class: 'row' },
           h('button', { type: 'button', class: 'btn small ghost', disabled: qi === 0, onclick: () => { [questions[qi - 1], questions[qi]] = [questions[qi], questions[qi - 1]]; draw(); } }, '↑'),
           h('button', { type: 'button', class: 'btn small ghost', disabled: qi === questions.length - 1, onclick: () => { [questions[qi + 1], questions[qi]] = [questions[qi], questions[qi + 1]]; draw(); } }, '↓'),
-          h('button', { type: 'button', class: 'btn small ghost danger', onclick: () => { questions.splice(qi, 1); draw(); } }, 'Xoá câu'))),
+          h('button', { type: 'button', class: 'btn small ghost danger', onclick: () => { questions.splice(qi, 1); draw(); } }, '✕'))),
       text, imagePickerButton(text, uploadImage),
       ...q.options.map((o, oi) => h('div', { class: 'row opt' },
         h('input', { type: 'checkbox', title: 'Đáp án đúng', checked: q.correct.includes(o.id), onchange: (ev) => { q.correct = ev.target.checked ? [...new Set([...q.correct, o.id])] : q.correct.filter((c) => c !== o.id); } }),
         h('b', null, o.id + '.'), h('input', { class: 'grow', placeholder: 'Nội dung đáp án', value: o.text, oninput: (ev) => { o.text = ev.target.value; } }),
-        h('button', { type: 'button', class: 'btn small ghost', onclick: () => { q.options.splice(oi, 1); q.correct = q.correct.filter((c) => c !== o.id); draw(); } }, 'Bỏ'))),
-      h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn small', disabled: q.options.length >= 10, onclick: () => { const used = new Set(q.options.map((o) => o.id)); const nid = 'ABCDEFGHIJ'.split('').find((c) => !used.has(c)); q.options.push({ id: nid, text: '' }); draw(); } }, 'Thêm đáp án'), h('small', { class: 'muted' }, 'Tích vào ô vuông bên trái đáp án đúng (nhiều đáp án đúng = câu chọn nhiều).')),
+        h('button', { type: 'button', class: 'btn small ghost', onclick: () => { q.options.splice(oi, 1); q.correct = q.correct.filter((c) => c !== o.id); draw(); } }, '−'))),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn small', disabled: q.options.length >= 10, onclick: () => { const used = new Set(q.options.map((o) => o.id)); const nid = 'ABCDEFGHIJ'.split('').find((c) => !used.has(c)); q.options.push({ id: nid, text: '' }); draw(); } }, '＋ Đáp án'), h('small', { class: 'muted' }, 'Tích ✔ vào đáp án đúng (nhiều đáp án đúng = câu chọn nhiều).')),
       expl);
   }));
   draw();
 
   const imp = h('textarea', { rows: 7, placeholder: 'Câu 1: Nội dung…\nA. Đáp án A\nB. Đáp án B\nĐáp án: B\nGiải thích: …' });
-  const impBtn = h('button', { type: 'button', class: 'btn' }, 'Đọc đề và thêm vào');
+  const impBtn = h('button', { type: 'button', class: 'btn' }, '📥 Đọc đề & thêm vào');
   impBtn.addEventListener('click', action(impBtn, async () => {
     const r = await post('/api/quizzes/parse', { text: imp.value }, { retry: true });
     questions = questions.filter((q) => q.text.trim() || q.options.some((o) => o.text.trim())).concat(r.questions); imp.value = ''; draw(); toast(`Đã thêm ${r.questions.length} câu — kiểm tra lại đáp án đúng`, 'ok');
@@ -84,9 +84,9 @@ export async function quizEditor(ctx, id) {
     h('div', { class: 'card stack' }, h('h2', null, isNew ? 'Tạo bài trắc nghiệm' : 'Sửa bài trắc nghiệm'), field('Tiêu đề', title), dl,
       h('div', { class: 'row' }, field('Môn / chủ đề', subject), field('Giới hạn thời gian (phút, 0 = không)', limit)),
       h('label', { class: 'row' }, shuffle, 'Xáo trộn thứ tự câu hỏi mỗi lần làm')),
-    h('details', { class: 'card' }, h('summary', null, 'Nhập nhanh từ văn bản'), imp, impBtn),
+    h('details', { class: 'card' }, h('summary', null, '📥 Nhập nhanh từ văn bản'), imp, impBtn),
     qbox,
-    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => { questions.push(blank()); draw(); } }, 'Thêm câu hỏi'), save, h('a', { class: 'btn ghost', href: '#/' }, 'Huỷ')));
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => { questions.push(blank()); draw(); } }, '＋ Thêm câu'), save, h('a', { class: 'btn ghost', href: '#/' }, 'Huỷ')));
   form.addEventListener('submit', action(save, async () => {
     await put(`/api/quizzes/${id}`, { title: title.value, subject: subject.value, timeLimitMin: Number(limit.value) || 0, shuffle: shuffle.checked,
       questions: questions.map((q) => ({ id: q.id, text: q.text, explanation: q.explanation, correct: q.correct, options: q.options })) });

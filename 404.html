@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Đang chuyển hướng…</title>
+  <script>
+    // GitHub Pages không có rewrite: gõ thẳng /ten-repo/xxx → về trang chủ ứng dụng
+    (function () {
+      var parts = location.pathname.split('/').filter(Boolean);
+      var isProject = /\.github\.io$/i.test(location.hostname);
+      var base = isProject && parts.length ? '/' + parts[0] + '/' : '/';
+      location.replace(base + 'frontend/');
+    })();
+  </script>
+</head>
+<body><p>Đang chuyển hướng… <a href="./">Về trang chủ</a></p></body>
+</html>

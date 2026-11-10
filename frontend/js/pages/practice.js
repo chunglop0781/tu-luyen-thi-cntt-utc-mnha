@@ -23,8 +23,8 @@ export async function essayPractice(ctx, id) {
     clearDraft(key); toast('Đã nộp bài', 'ok'); ctx.go(`/submission/${r.submission.id}`);
   }));
   return h('div', { class: 'stack' },
-    h('div', { class: 'card stack' }, h('div', { class: 'row between' }, h('h1', { class: 'title' }, item.title), timer), item.subject ? h('div', null, h('span', { class: 'badge essay' }, item.subject)) : null, h('h3', null, 'Đề bài'), rich(item.prompt)),
-    h('div', { class: 'card stack' }, h('h3', null, 'Bài làm'), ta, h('small', { class: 'muted' }, 'Bản nháp tự lưu trên máy bạn.'), h('div', { class: 'row' }, submit, h('a', { class: 'btn ghost', href: '#/' }, 'Thoát'))));
+    h('div', { class: 'card' }, h('div', { class: 'row between' }, h('h2', null, item.title), timer), item.subject ? h('span', { class: 'badge' }, item.subject) : null, h('h3', null, 'Đề bài'), rich(item.prompt)),
+    h('div', { class: 'card stack' }, h('h3', null, 'Bài làm'), ta, h('small', { class: 'muted' }, '💾 Bản nháp tự lưu trên máy bạn.'), h('div', { class: 'row' }, submit, h('a', { class: 'btn ghost', href: '#/' }, 'Thoát'))));
 }
 
 const shuffled = (a) => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -71,11 +71,11 @@ export async function quizPractice(ctx, id) {
   if (item.timeLimitMin) {
     const end = new Date(d.startedAt).getTime() + item.timeLimitMin * 60000;
     const tick = setInterval(() => {
-      const s = Math.max(0, Math.round((end - Date.now()) / 1000)); timer.textContent = 'Còn ' + fmtDur(s);
+      const s = Math.max(0, Math.round((end - Date.now()) / 1000)); timer.textContent = '⏱ ' + fmtDur(s);
       if (s === 0) { clearInterval(tick); toast('Hết giờ — đang nộp bài', 'info'); doSubmit(true).catch((e) => toast(e.message, 'err')); }
     }, 1000); ctx.setCleanup(() => clearInterval(tick));
   }
   return h('div', { class: 'stack' },
-    h('div', { class: 'card sticky stack', style: 'gap:.5rem' }, h('div', { class: 'row between' }, h('h2', null, item.title), timer), h('div', { class: 'row between' }, answered, mkSubmit())),
+    h('div', { class: 'card sticky' }, h('div', { class: 'row between' }, h('h2', null, item.title), timer), h('div', { class: 'row between' }, answered, mkSubmit())),
     ...qs, h('div', { class: 'row' }, mkSubmit(), h('a', { class: 'btn ghost', href: '#/' }, 'Thoát')));
 }
