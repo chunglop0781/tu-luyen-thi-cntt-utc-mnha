@@ -143,9 +143,19 @@ function createPrompts({ store }) {
     return promptId;
   }
 
+  /** Prompt sẽ dùng cho một bài của CHÍNH người dùng + cấp gán ('item' = gắn riêng cho bài, 'default' = mặc định của tôi, 'fallback' = mẫu hệ thống). */
+  async function info(uid, kind, promptId) {
+    const r = await store.read('data', docPath(uid), { fresh: true });
+    const all = (r && r.data && Array.isArray(r.data.prompts)) ? r.data.prompts.filter((p) => p.kind === kind) : [];
+    const byItem = promptId ? all.find((p) => p.id === promptId) : null;
+    const p = byItem || all.find((x) => x.isDefault) || null;
+    if (!p) return { id: null, name: 'Mẫu mặc định của hệ thống', scope: 'fallback', unknownPlaceholders: [] };
+    return { id: p.id, name: p.name, scope: byItem ? 'item' : 'default', unknownPlaceholders: unknownPlaceholders(p.content, kind) };
+  }
+
   const meta = () => ({ placeholders: PLACEHOLDERS, defaults: DEFAULTS, strictness: STRICTNESS, maxPrompts: MAX_PROMPTS, maxContent: MAX_CONTENT });
 
-  return { list, upsert, remove, resolve, assertUsable, meta };
+  return { list, upsert, remove, resolve, info, assertUsable, meta };
 }
 
 module.exports = { createPrompts, render, unknownPlaceholders, sanitizePrompt, DEFAULT_ESSAY_PROMPT, DEFAULT_QUIZ_PROMPT, PLACEHOLDERS, STRICTNESS };

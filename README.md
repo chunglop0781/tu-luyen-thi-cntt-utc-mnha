@@ -86,6 +86,8 @@ Thanh trên cùng hiện **email đăng nhập** (tài khoản cũ chưa có ema
 - Dữ liệu: `…-data/shares/<shareId>.json` (chủ bài, loại bài, trạng thái, danh sách `{id, uid, tên, giờ, điểm}`).
 - **Bài nộp từ link chia sẻ không xoá được** (như luyen-thi) nên điểm không biến mất khỏi biểu đồ chung.
 - **Tự luận**: nộp xong chưa có điểm (hiện “Chờ chấm AI”, chưa lên biểu đồ). Người làm tự bấm **🤖 Chấm bằng AI** — dùng nhà cung cấp + API key trong tài khoản của CHÍNH họ (Cài đặt → Nhà cung cấp AI); chỉ chấm được **một lần**, không tự nhập điểm. Chấm xong điểm (quy về thang 10) mới lên biểu đồ. Người làm không thấy đáp án mẫu trước khi nộp; chủ bài không đọc được bài làm của người khác.
+- **Trang làm bài tự luận** (`#/essay/<id>`) khớp bản gốc: dòng “🧠 Prompt chấm đang dùng” (API `GET /api/prompts/resolve?type=essay&itemId=…`), âm báo hết giờ (khoá tới 00:00, phát lặp, tắt khi nộp), nút 📊 lịch sử, thanh AI (chọn nhà cung cấp/model, 🎲, 🔄 kiểm tra kết nối), bố cục 2 cột Đề bài | Bài viết, **khoá làm bài tới khi AI kết nối** (đồng hồ chạy từ lúc mở khoá) và **nộp xong tự chấm AI**.
+- **Không làm phần vẽ tay** (bảng vẽ, ảnh → nét vẽ, tải ảnh/PDF làm bài) của bản gốc cho bài tự luận — không cần thêm; bài làm chỉ là văn bản.
 - Test: `npm test` (backend, có mục “Chia sẻ bài trắc nghiệm” và “Chia sẻ bài tự luận”) và `NODE_PATH=test/stubs/node_modules:<playwright> node test/e2e-share.js` (trình duyệt thật).
 
 ## Kiểm thử

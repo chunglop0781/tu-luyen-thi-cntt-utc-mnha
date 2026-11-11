@@ -104,6 +104,11 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
 
   // ── Prompt chấm / phân tích AI riêng của từng tài khoản (essay = chấm tự luận, quiz = phân tích trắc nghiệm) ──
   router.get('/api/prompts', async (ctx) => { const a = authed(ctx); return { ok: true, prompts: await content.prompts.list(a.sub, ctx.query.get('kind') || undefined), ...content.prompts.meta() }; });
+  router.get('/api/prompts/resolve', async (ctx) => {      // prompt đang dùng cho một bài của mình (trang làm bài hiện "Prompt chấm đang dùng")
+    const a = authed(ctx); const type = ctx.query.get('type') === 'quiz' ? 'quiz' : 'essay';
+    const item = await content.getItem(a.sub, type, ctx.query.get('itemId'));
+    return { ok: true, prompt: await content.prompts.info(a.sub, type, item.promptId) };
+  });
   router.put('/api/prompts/:id', async (ctx) => ({ ok: true, ...(await content.prompts.upsert(authed(ctx).sub, ctx.params.id, ctx.body)) }));
   router.delete('/api/prompts/:id', async (ctx) => { await content.prompts.remove(authed(ctx).sub, ctx.params.id); return { ok: true }; });
 
