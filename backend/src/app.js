@@ -102,6 +102,11 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
     return { ok: true, result: await content.testAi(a.sub, { provider: ctx.body.provider, model: ctx.body.model }) };
   });
 
+  // ── Prompt chấm / phân tích AI riêng của từng tài khoản (essay = chấm tự luận, quiz = phân tích trắc nghiệm) ──
+  router.get('/api/prompts', async (ctx) => { const a = authed(ctx); return { ok: true, prompts: await content.prompts.list(a.sub, ctx.query.get('kind') || undefined), ...content.prompts.meta() }; });
+  router.put('/api/prompts/:id', async (ctx) => ({ ok: true, ...(await content.prompts.upsert(authed(ctx).sub, ctx.params.id, ctx.body)) }));
+  router.delete('/api/prompts/:id', async (ctx) => { await content.prompts.remove(authed(ctx).sub, ctx.params.id); return { ok: true }; });
+
   // ── Bài tập ──
   router.get('/api/overview', async (ctx) => ({ ok: true, ...(await content.overview(authed(ctx).sub)) }));
   router.post('/api/reindex', async (ctx) => { await content.reindex(authed(ctx).sub); return { ok: true, ...(await content.overview(authed(ctx).sub)) }; });

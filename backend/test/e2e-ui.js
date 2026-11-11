@@ -17,8 +17,8 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
   const outbox = []; const mailer = { configured: true, send: async (m) => { outbox.push(m); } };
   const aiCalls = [];
   const aiFetch = async (url, init) => {
-    const b = JSON.parse(init.body); aiCalls.push({ url: String(url), auth: init.headers.Authorization || init.headers['x-goog-api-key'], model: b.model });
-    const ping = /only with the word OK/.test(JSON.stringify(b)); const analysis = /giảng viên hướng dẫn học tập/.test(JSON.stringify(b)); const reply = ping ? 'OK' : analysis ? JSON.stringify({ summary: 'Bạn yếu phần mạng', weakTopics: [{ topic: 'Giao thức', wrongCount: 1, questions: [1], advice: 'Ôn TCP/UDP' }], mistakes: [{ q: 1, why: 'Nhầm UDP với TCP', correctReasoning: 'UDP không kết nối', tip: 'Nhớ: U = Unreliable' }], studyPlan: ['Đọc lại chương giao thức'] }) : JSON.stringify({ score: 6, feedback: 'Khá tốt', strengths: ['đủ ý'], weaknesses: ['thiếu ví dụ'] });
+    const b = JSON.parse(init.body); aiCalls.push({ url: String(url), auth: init.headers.Authorization || init.headers['x-goog-api-key'], model: b.model, text: JSON.stringify(b) });
+    const ping = /only with the word OK/.test(JSON.stringify(b)); const analysis = /giảng viên hướng dẫn học tập|weakTopics/.test(JSON.stringify(b)); const reply = ping ? 'OK' : analysis ? JSON.stringify({ summary: 'Bạn yếu phần mạng', weakTopics: [{ topic: 'Giao thức', wrongCount: 1, questions: [1], advice: 'Ôn TCP/UDP' }], mistakes: [{ q: 1, why: 'Nhầm UDP với TCP', correctReasoning: 'UDP không kết nối', tip: 'Nhớ: U = Unreliable' }], studyPlan: ['Đọc lại chương giao thức'] }) : JSON.stringify({ score: 6, feedback: 'Khá tốt', strengths: ['đủ ý'], weaknesses: ['thiếu ví dụ'] });
     return new Response(JSON.stringify(String(url).includes('chat/completions') ? { choices: [{ message: { content: reply } }] } : { candidates: [{ content: { parts: [{ text: reply }] } }] }), { status: 200 });
   };
   const app = createApp({ env, fetchImpl: gh.fetch, aiFetch, mailer, dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }] });
@@ -142,6 +142,42 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     ok(await page.isVisible('.card.an >> text=vilao.ai · gpt-4o'), 'ghi rõ nhà cung cấp + model');
     await page.click('.card.an .chip >> nth=0'); await page.waitForSelector('.qcard.flash'); ok(true, 'bấm chip "Câu 1" cuộn tới đúng câu');
     ok(await page.isVisible('text=Đã dùng 1/5 lần'), 'hiện số lần đã dùng');
+    console.log('Prompt AI riêng (trang quản lý, chọn trong trình soạn, dùng khi chấm/phân tích)');
+    ok(await page.isVisible('.top nav a:has-text("Prompt AI")'), 'thanh trên cùng có mục "Prompt AI"');
+    await page.goto(B + '#/prompts'); await page.waitForSelector('h2:text-is("Prompt AI của tôi")');
+    ok((await page.$$('.card.item')).length === 0 && await page.isVisible('text=AI đang dùng mẫu mặc định >> nth=0'), 'tài khoản mới chưa có prompt riêng');
+    await page.click('a:has-text("＋ Tạo prompt") >> nth=0'); await page.waitForSelector('textarea');
+    ok((await page.inputValue('textarea')).includes('{bài_làm}'), 'prompt tự luận mới có sẵn mẫu mặc định để sửa');
+    await page.fill('input[placeholder^="VD: Chấm nghiêm"]', 'Chấm kiểu mnha');
+    await page.fill('textarea', 'MARK-UI-ESSAY chấm theo {đề_bài}: {bài_làm} {sai_ten}');
+    ok(await page.isVisible('.alert.warn:has-text("{sai_ten}")'), 'cảnh báo ngay khi gõ sai tên biến');
+    await page.fill('textarea', 'MARK-UI-ESSAY chấm theo {đề_bài}: '); await page.click('.chips button:has-text("{bài_làm}")');
+    ok((await page.inputValue('textarea')).endsWith('{bài_làm}') && !(await page.isVisible('.alert.warn')), 'bấm biến → chèn vào nội dung, hết cảnh báo');
+    await page.check('label:has-text("Đặt làm mặc định") input'); await page.click('button:has-text("Lưu prompt")'); await page.waitForSelector('.card.item:has-text("Chấm kiểu mnha")');
+    ok(await page.isVisible('.card.item:has-text("Chấm kiểu mnha") >> text=Mặc định'), 'prompt vừa tạo hiện trong danh sách, đánh dấu mặc định');
+    await page.click('a:has-text("＋ Tạo prompt") >> nth=1'); await page.waitForSelector('textarea');
+    ok((await page.inputValue('textarea')).includes('{đề_trắc_nghiệm}'), 'prompt trắc nghiệm có biến riêng');
+    await page.fill('input[placeholder^="VD: Phân tích"]', 'Phân tích kiểu mnha'); await page.fill('textarea', 'MARK-UI-QUIZ phân tích {đề_trắc_nghiệm} {kết_quả}'); await page.click('button:has-text("Lưu prompt")'); await page.waitForSelector('.card.item:has-text("Phân tích kiểu mnha")');
+    ok((await page.$$('.card.item')).length === 2, 'danh sách có 2 prompt (tự luận + trắc nghiệm)');
+    // chọn prompt trong trình soạn tự luận → lưu vào bài
+    await page.goto(B + '#/essay/' + eid + '/edit'); await page.waitForSelector('.prompt-pick select');
+    ok((await page.$$eval('.prompt-pick option', (o) => o.map((x) => x.textContent))).some((t2) => /Chấm kiểu mnha/.test(t2)), 'trình soạn tự luận liệt kê prompt tự luận của tôi');
+    await page.selectOption('.prompt-pick select', { label: 'Chấm kiểu mnha (mặc định)' }); await page.click('button:has-text("Lưu bài")'); await page.waitForSelector('h2:text-is("Bài của tôi")');
+    const eItem = (await (await fetch('http://127.0.0.1:4201/api/essays/' + eid, { headers: H })).json()).item; ok(!!eItem.promptId, 'bài tự luận đã lưu promptId');
+    await page.goto(B + '#/submission/' + sid); await page.waitForSelector('text=Chấm bằng AI'); await page.click('button:has-text("Chấm bằng AI")'); await page.waitForSelector('.card:has-text("Chấm bằng AI") >> text=prompt “Chấm kiểu mnha”');
+    ok(aiCalls.at(-1).text.includes('MARK-UI-ESSAY'), 'AI nhận đúng prompt riêng khi chấm tự luận');
+    // trình soạn trắc nghiệm
+    await page.goto(B + '#/quiz/' + qid + '/edit'); await page.waitForSelector('.prompt-pick select'); await page.waitForSelector('#btnSave');
+    await page.selectOption('.prompt-pick select', { label: 'Phân tích kiểu mnha' }); await page.click('#btnSave'); await page.waitForSelector('h2:text-is("Bài của tôi")', { timeout: 15000 });
+    const qItem = (await (await fetch('http://127.0.0.1:4201/api/quizzes/' + qid, { headers: H })).json()).item; ok(!!qItem.promptId, 'đề trắc nghiệm đã lưu promptId (qua trình soạn cũ)');
+    const qs2 = 'c1b2c3d4e5f60718'; await fetch('http://127.0.0.1:4201/api/submissions/' + qs2, { method: 'PUT', headers: H, body: JSON.stringify({ itemType: 'quiz', itemId: qid, answers: {} }) });
+    await page.goto(B + '#/submission/' + qs2); await page.waitForSelector('h3:text-is("Phân tích AI")'); await page.click('button:has-text("Phân tích AI")'); await page.waitForSelector('.card.an');
+    ok(await page.isVisible('.card.an >> text=prompt: Phân tích kiểu mnha') && aiCalls.at(-1).text.includes('MARK-UI-QUIZ'), 'phân tích trắc nghiệm dùng prompt riêng và ghi rõ tên prompt');
+    // xoá prompt qua giao diện
+    await page.goto(B + '#/prompts'); await page.waitForSelector('.card.item'); page.once('dialog', (d) => d.accept());
+    await page.click('.card.item:has-text("Phân tích kiểu mnha") >> button:has-text("Xoá")'); await page.waitForSelector('.card.item:has-text("Phân tích kiểu mnha")', { state: 'detached' });
+    ok((await page.$$('.card.item')).length === 1, 'xoá prompt → biến mất khỏi danh sách');
+    await page.screenshot({ path: '/tmp/ui-prompts.png', fullPage: true });
     await page.screenshot({ path: '/tmp/ui-analysis.png', fullPage: true });
     ok(errors.length === 0, 'không có lỗi JS/console: ' + JSON.stringify(errors));
     await page.screenshot({ path: '/tmp/ui-submission.png' }); await page.goto(B + '#/settings/ai'); await page.waitForSelector('.prov'); await page.screenshot({ path: '/tmp/ui-settings.png', fullPage: true });

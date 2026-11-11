@@ -1,5 +1,6 @@
 import { get, put, post, uploadImage, newId } from '../api.js';
 import { h, action, toast, imagePickerButton } from '../ui.js';
+import { promptPicker } from './prompts.js';
 
 const field = (label, el, hint) => h('label', { class: 'field' }, h('span', null, label), el, hint ? h('small', { class: 'muted' }, hint) : null);
 
@@ -17,7 +18,8 @@ function promptGuide() {
 
 export async function essayEditor(ctx, id) {
   const isNew = !id; id = id || newId();
-  const [item, subjects] = await Promise.all([isNew ? null : get(`/api/essays/${id}`).then((r) => r.item), subjectsList()]);
+  const item = isNew ? null : (await get(`/api/essays/${id}`)).item;
+  const [subjects, picker] = await Promise.all([subjectsList(), promptPicker('essay', item && item.promptId)]);
   const e = item || { title: '', subject: '', prompt: '', modelAnswer: '', maxScore: 10, rubric: [] };
   const title = h('input', { value: e.title, maxlength: 200, required: true, placeholder: 'VD: So sánh TCP và UDP' });
   const dl = h('datalist', { id: 'subj' }, subjects.map((s) => h('option', { value: s })));
@@ -41,6 +43,7 @@ export async function essayEditor(ctx, id) {
     h('h2', null, isNew ? 'Tạo bài tự luận' : 'Sửa bài tự luận'),
     field('Tiêu đề', title), h('div', { class: 'row' }, field('Môn / chủ đề', subject), field('Thang điểm', maxScore)), dl,
     h('div', { class: 'row' }, field('⏱ Thời gian làm bài (phút)', duration), h('label', { class: 'row opt' }, untimed, h('span', null, 'Không đếm giờ'))),
+    picker.el,
     promptGuide(),
     field('Đề bài', prompt), imagePickerButton(prompt, uploadImage),
     field('Đáp án mẫu', model), imagePickerButton(model, uploadImage),
@@ -48,7 +51,7 @@ export async function essayEditor(ctx, id) {
     h('button', { type: 'button', class: 'btn small', onclick: () => { rubric.push({ name: '', points: 1, keywords: '' }); drawRubric(); } }, '＋ Thêm tiêu chí'),
     h('div', { class: 'row' }, save, h('a', { class: 'btn ghost', href: '#/' }, 'Huỷ')));
   form.addEventListener('submit', action(save, async () => {
-    await put(`/api/essays/${id}`, { title: title.value, subject: subject.value, maxScore: Number(maxScore.value), prompt: prompt.value, modelAnswer: model.value, rubric: rubric.filter((r) => r.name.trim()), duration: untimed.checked ? null : Number(duration.value), timerMode: untimed.checked ? 'untimed' : 'timed' });
+    await put(`/api/essays/${id}`, { title: title.value, subject: subject.value, maxScore: Number(maxScore.value), prompt: prompt.value, modelAnswer: model.value, rubric: rubric.filter((r) => r.name.trim()), duration: untimed.checked ? null : Number(duration.value), timerMode: untimed.checked ? 'untimed' : 'timed', promptId: picker.value() });
     toast('Đã lưu', 'ok'); ctx.go('/');
   }));
   return form;

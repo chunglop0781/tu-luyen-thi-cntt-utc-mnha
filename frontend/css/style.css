@@ -148,3 +148,9 @@ details{border:1px solid var(--line);border-radius:12px;padding:10px 14px;backgr
 .hc-plot{position:relative;margin-top:8px}.hc-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:14px;pointer-events:none}
 .hc-tip{position:absolute;z-index:5;pointer-events:none;background:#111827;color:#fff;font-size:12px;line-height:1.5;padding:8px 10px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.25);white-space:nowrap}.hc-dim{opacity:.75}
 .hc-legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.hc-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border:1px solid var(--line);border-radius:999px;font-size:12px;background:#fff;color:#374151}.hc-chip i{display:inline-block;width:10px;height:10px;border-radius:50%}
+/* Prompt AI riêng */
+.prompt-snippet{white-space:pre-wrap;word-break:break-word;margin:0;padding:10px 12px;border-radius:10px;background:var(--soft);color:var(--muted);font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace;max-height:7.5em;overflow:hidden}
+.chips{gap:6px}.chip-btn{border:1px solid var(--line);background:var(--pri-soft);color:var(--pri);border-radius:999px;padding:3px 10px;font:600 12.5px/1.4 inherit;cursor:pointer}.chip-btn:hover{border-color:var(--pri)}
+textarea[spellcheck=false]{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13.5px;line-height:1.55}
+.prompt-pick small a{white-space:nowrap}
+.alert[hidden]{display:none}

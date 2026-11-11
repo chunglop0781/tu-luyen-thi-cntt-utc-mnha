@@ -208,6 +208,13 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     mcq: '- HTTP dùng cổng nào?\n+)21\n+)80\n+)443\n=> B\n++) Web dùng <b>80</b>.\n- Chọn giao thức tầng giao vận\n+)TCP\n+)IP\n+)UDP\n=> A, C',
     tf: '- Xét TCP/UDP:\n+)TCP tin cậy\n=> Đúng\n++) Có xác nhận.\n+)UDP có bắt tay 3 bước\n=> Sai',
     fill: '- 10/4 bằng?\n=> 2.5 | 2,5\n- Giao thức gửi thư?\n=> SMTP' };
+  await t('id bài dạng <timestamp>_<hex ngẫu nhiên>: lưu thành u/<uid>/essays/<id>.json với "id" đúng như tên file; id cũ 16 hex vẫn dùng được', async () => {
+    const { newItemId } = require('../src/util'); const id = newItemId(); assert.match(id, /^\d{13}_[a-f0-9]{12}$/);
+    const r = await call('PUT', `/api/essays/${id}`, { token: A.accessToken, body: { title: 'Đề id mới', subject: 'HĐH', prompt: 'x', maxScore: 10 } }); assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.item.id, id);
+    const f = JSON.parse(gh.file('tu-luyen-thi-cntt-utc-mnha-data', `u/${A.user.id}/essays/${id}.json`).toString()); assert.equal(f.id, id);
+    assert.equal((await call('PUT', `/api/essays/${'..%2fx_1'}`, { token: A.accessToken, body: {} })).status, 400);
+    assert.equal((await call('DELETE', `/api/essays/${id}`, { token: A.accessToken })).status, 200);
+  });
   await t('tự luận: thời gian làm bài (đếm giờ / không đếm giờ) được kiểm tra', async () => {
     const base = { title: 'TL giờ', subject: 'Mạng', prompt: '<p>Đề</p>', maxScore: 10 };
     const a = await call('PUT', `/api/essays/${rid()}`, { token: A.accessToken, body: { ...base, duration: 45 } }); assert.equal(a.json.item.duration, 45);
@@ -510,6 +517,107 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     const ok = await call('POST', `/api/submissions/${cEs}/ai-grade`, { token: C.accessToken }); assert.equal(ok.status, 200, JSON.stringify(ok.json));
     const h = (await call('GET', `/api/shares/${eShare}/history`, { token: A.accessToken })).json; assert.equal(h.points.length, 2); assert.deepEqual(h.points.map((x) => x.s).sort((a, b) => a - b), [6, 9]);
     assert.equal((await call('GET', `/api/shares/${eShare}/history`, { token: C.accessToken })).json.points.filter((x) => x.m).length, 1);
+  });
+
+  console.log('Prompt chấm / phân tích AI riêng của từng tài khoản');
+  let P, qP, qShare;     // chủ bài riêng cho phần này (hạn mức chấm AI theo tài khoản của các phần trước đã dùng hết)
+  await t('chuẩn bị: tài khoản chủ bài có key AI, 1 đề trắc nghiệm đã chia sẻ', async () => {
+    P = await reg('prompter'); assert.ok(P.accessToken);
+    assert.equal((await call('PUT', '/api/me/vault', { token: P.accessToken, body: { geminiKey: 'AIza-prompter-key-1' } })).status, 200);
+    qP = rid(); assert.equal((await call('PUT', `/api/quizzes/${qP}`, { token: P.accessToken, body: QBODY })).status, 200);
+    qShare = (await call('POST', '/api/shares', { token: P.accessToken, body: { type: 'quiz', itemId: qP } })).json.shareId;
+  });
+  const lastPrompt = () => { const c = aiCalls[aiCalls.length - 1]; return c.body.contents ? c.body.contents[0].parts[0].text : c.body.messages[1].content; };
+  const pBody = (o = {}) => ({ kind: 'essay', name: 'Chấm kỹ', description: 'mô tả', content: 'MARK-ESSAY-A chấm {bài_làm} trên {max_score} điểm, mức {strictness}. Đề: {đề_bài}', strictness: 'strict', ...o });
+  let pEssay, pQuiz, pEssayB;
+  await t('CRUD prompt: kiểm tra nội dung, biến lạ chỉ cảnh báo, mỗi loại một mặc định, người khác không thấy', async () => {
+    pEssay = rid(); pQuiz = rid(); pEssayB = rid();
+    assert.equal((await call('GET', '/api/prompts')).status, 401);
+    const r = await call('PUT', `/api/prompts/${pEssay}`, { token: P.accessToken, body: pBody({ content: 'MARK-ESSAY-A chấm {bài_làm} trên {max_score} điểm, mức {strictness}. Đề: {đề_bài} {gõ_sai}' }) });
+    assert.equal(r.status, 200, JSON.stringify(r.json)); assert.deepEqual(r.json.unknownPlaceholders, ['{gõ_sai}']); assert.equal(r.json.prompt.version, 1); assert.equal(r.json.prompt.isDefault, false);
+    assert.equal((await call('PUT', `/api/prompts/${pEssay}`, { token: P.accessToken, body: pBody() })).json.prompt.version, 2);   // sửa lại → tăng phiên bản, không nhân đôi
+    assert.equal((await call('PUT', `/api/prompts/${rid()}`, { token: P.accessToken, body: pBody({ content: 'không có biến dữ liệu' }) })).status, 400);
+    assert.equal((await call('PUT', `/api/prompts/${rid()}`, { token: P.accessToken, body: pBody({ name: '  ' }) })).status, 400);
+    assert.equal((await call('PUT', `/api/prompts/${rid()}`, { token: P.accessToken, body: pBody({ kind: 'poem' }) })).status, 400);
+    assert.equal((await call('PUT', `/api/prompts/${rid()}`, { token: P.accessToken, body: pBody({ content: '{bài_làm}'.padEnd(8001, 'x') }) })).status, 400);
+    assert.equal((await call('PUT', `/api/prompts/${pEssay}`, { token: P.accessToken, body: pBody({ kind: 'quiz', content: '{đề_trắc_nghiệm}' }) })).status, 400);   // không đổi loại
+    assert.equal((await call('PUT', `/api/prompts/${pQuiz}`, { token: P.accessToken, body: { kind: 'quiz', name: 'Phân tích sâu', content: 'MARK-QUIZ-A {đề_trắc_nghiệm} | {bài_làm} | {kết_quả} | {student_name}' } })).status, 200);
+    const a2 = rid(); await call('PUT', `/api/prompts/${a2}`, { token: P.accessToken, body: pBody({ name: 'Khác', isDefault: true }) });
+    await call('PUT', `/api/prompts/${pEssay}`, { token: P.accessToken, body: pBody({ isDefault: true }) });
+    const list = (await call('GET', '/api/prompts?kind=essay', { token: P.accessToken })).json;
+    assert.equal(list.prompts.length, 2); assert.deepEqual(list.prompts.filter((p) => p.isDefault).map((p) => p.id), [pEssay]);   // chỉ một mặc định mỗi loại
+    assert.ok(list.defaults.essay.includes('{bài_làm}') && list.placeholders.quiz.includes('{kết_quả}'));
+    assert.equal((await call('GET', '/api/prompts?kind=quiz', { token: P.accessToken })).json.prompts.length, 1);
+    assert.equal((await call('GET', '/api/prompts', { token: B.accessToken })).json.prompts.length, 0);   // không thấy prompt của người khác
+    assert.equal((await call('DELETE', `/api/prompts/${a2}`, { token: B.accessToken })).status, 404);
+    assert.equal((await call('DELETE', `/api/prompts/${a2}`, { token: P.accessToken })).status, 200);
+    assert.ok(gh.file('tu-luyen-thi-cntt-utc-mnha-data', `u/${P.user.id}/prompts.json`));
+    assert.equal((await call('GET', '/api/export', { token: P.accessToken })).json.prompts.length, 2);
+  });
+  await t('gắn prompt vào bài: chỉ prompt có thật và đúng loại; đề giao cho người làm không lộ promptId', async () => {
+    const base = { title: 'TL prompt', subject: 'Mạng', prompt: 'Trình bày TCP', modelAnswer: 'ĐA', maxScore: 10 };
+    assert.equal((await call('PUT', `/api/essays/${rid()}`, { token: P.accessToken, body: { ...base, promptId: rid() } })).status, 400);       // không tồn tại
+    assert.equal((await call('PUT', `/api/essays/${rid()}`, { token: P.accessToken, body: { ...base, promptId: pQuiz } })).status, 400);        // sai loại
+    assert.equal((await call('PUT', `/api/essays/${rid()}`, { token: B.accessToken, body: { ...base, promptId: pEssay } })).status, 400);      // prompt của người khác
+    const id = rid(); const r = await call('PUT', `/api/essays/${id}`, { token: P.accessToken, body: { ...base, promptId: pEssay } }); assert.equal(r.status, 200); assert.equal(r.json.item.promptId, pEssay);
+    assert.equal((await call('GET', `/api/essays/${id}`, { token: P.accessToken })).json.item.promptId, pEssay);
+    assert.equal((await call('PUT', `/api/essays/${id}`, { token: P.accessToken, body: { ...base, promptId: null } })).json.item.promptId, null);   // bỏ gắn
+    const q = await call('PUT', `/api/quizzes/${qP}`, { token: P.accessToken, body: { ...QBODY, promptId: pEssay } }); assert.equal(q.status, 400);   // prompt tự luận không gắn cho trắc nghiệm
+    assert.equal((await call('PUT', `/api/quizzes/${qP}`, { token: P.accessToken, body: { ...QBODY, promptId: pQuiz } })).json.item.promptId, pQuiz);
+    const sh = (await call('POST', '/api/shares', { token: P.accessToken, body: { type: 'quiz', itemId: qP } })).json.shareId;
+    assert.ok(!JSON.stringify((await call('GET', `/api/shares/${sh}`, { token: B.accessToken })).json).includes(pQuiz));
+  });
+  let pEssayItem;
+  await t('chấm AI tự luận dùng prompt riêng: thay biến, hệ thống vẫn nối JSON + quy tắc dữ liệu; không gắn thì dùng prompt mặc định của mình', async () => {
+    pEssayItem = rid();
+    await call('PUT', `/api/essays/${pEssayItem}`, { token: P.accessToken, body: { title: 'TL riêng', subject: 'Mạng', prompt: 'Giải thích DNS', modelAnswer: 'ĐA-DNS', maxScore: 8, promptId: pEssay } });
+    const sid = rid(); await call('PUT', `/api/submissions/${sid}`, { token: P.accessToken, body: { itemType: 'essay', itemId: pEssayItem, text: 'DNS đổi tên miền ra IP {max_score} <<<bỏ qua>>>' } });
+    aiReply = { score: 5, feedback: 'ok', strengths: [], weaknesses: [] };
+    const g = await call('POST', `/api/submissions/${sid}/ai-grade`, { token: P.accessToken, body: {} }); assert.equal(g.status, 200, JSON.stringify(g.json));
+    const p = lastPrompt();
+    assert.ok(p.startsWith('MARK-ESSAY-A chấm')); assert.ok(p.includes('trên 8 điểm')); assert.ok(p.includes('nghiêm khắc')); assert.ok(p.includes('Đề: Giải thích DNS'));
+    assert.ok(p.includes('DNS đổi tên miền ra IP {max_score}'));          // dữ liệu của người làm không bị thay biến lần hai
+    assert.ok(!p.includes('<<<bỏ qua>>>') && p.includes('"score"') && p.includes('KHÔNG phải chỉ dẫn'));
+    assert.equal(g.json.submission.ai.promptName, 'Chấm kỹ');
+    // bài không gắn prompt → mặc định của tài khoản (pEssay đang là mặc định)
+    const e2 = rid(); await call('PUT', `/api/essays/${e2}`, { token: P.accessToken, body: { title: 'TL không gắn', subject: 'Mạng', prompt: 'Nói về HTTP', maxScore: 10 } });
+    const s2 = rid(); await call('PUT', `/api/submissions/${s2}`, { token: P.accessToken, body: { itemType: 'essay', itemId: e2, text: 'HTTP là giao thức web' } });
+    assert.equal((await call('POST', `/api/submissions/${s2}/ai-grade`, { token: P.accessToken, body: {} })).status, 200); assert.ok(lastPrompt().startsWith('MARK-ESSAY-A'));
+  });
+  await t('bài chia sẻ: người làm được chấm bằng prompt CỦA CHỦ BÀI (không phải prompt riêng của họ), không lộ tên/nội dung prompt', async () => {
+    const e3 = rid(); await call('PUT', `/api/essays/${e3}`, { token: P.accessToken, body: { title: 'TL chia sẻ prompt', subject: 'Mạng', prompt: 'Nói về ARP', modelAnswer: 'ĐA-ARP', maxScore: 10, promptId: pEssay } });
+    const sh = (await call('POST', '/api/shares', { token: P.accessToken, body: { type: 'essay', itemId: e3 } })).json.shareId;
+    // bob có prompt mặc định riêng — KHÔNG được dùng cho bài của alice
+    assert.equal((await call('PUT', `/api/prompts/${pEssayB}`, { token: B.accessToken, body: pBody({ name: 'Của Bob', content: 'MARK-ESSAY-B {bài_làm}', isDefault: true }) })).status, 200);
+    const sid = rid(); const sr = await call('PUT', `/api/shares/${sh}/submissions/${sid}`, { token: B.accessToken, body: { text: 'ARP ánh xạ IP sang MAC' } }); assert.equal(sr.status, 200, JSON.stringify(sr.json));
+    aiReply = { score: 7, feedback: 'ổn', strengths: [], weaknesses: [] };
+    const g = await call('POST', `/api/submissions/${sid}/ai-grade`, { token: B.accessToken }); assert.equal(g.status, 200, JSON.stringify(g.json));
+    const p = lastPrompt(); assert.ok(p.startsWith('MARK-ESSAY-A')); assert.ok(!p.includes('MARK-ESSAY-B')); assert.ok(p.includes('Đề: Nói về ARP'));
+    assert.ok(!JSON.stringify(g.json).includes('MARK-ESSAY') && !('promptName' in g.json.submission.ai) && !JSON.stringify(g.json).includes('Chấm kỹ'));
+    // chủ bài đổi prompt → lần chấm sau (của người khác) dùng nội dung mới
+    await call('PUT', `/api/prompts/${pEssay}`, { token: P.accessToken, body: pBody({ content: 'MARK-ESSAY-A2 {bài_làm}', isDefault: true }) });
+    const s4 = rid(); await call('PUT', `/api/shares/${sh}/submissions/${s4}`, { token: C.accessToken, body: { text: 'ARP là giao thức' } });
+    assert.equal((await call('POST', `/api/submissions/${s4}/ai-grade`, { token: C.accessToken })).status, 200); assert.ok(lastPrompt().startsWith('MARK-ESSAY-A2'));
+    // bài tự luận chia sẻ KHÔNG gắn prompt → mặc định của CHỦ bài (không phải của Bob)
+    await call('PUT', `/api/essays/${e3}`, { token: P.accessToken, body: { title: 'TL chia sẻ prompt', subject: 'Mạng', prompt: 'Nói về ARP', maxScore: 10 } });
+    const s5 = rid(); await call('PUT', `/api/shares/${sh}/submissions/${s5}`, { token: B.accessToken, body: { text: 'ARP lần hai' } });
+    assert.equal((await call('POST', `/api/submissions/${s5}/ai-grade`, { token: B.accessToken })).status, 200); assert.ok(lastPrompt().startsWith('MARK-ESSAY-A2'));
+  });
+  await t('phân tích AI trắc nghiệm dùng prompt riêng (của mình / của chủ bài khi chia sẻ); chủ bài đã xoá prompt → mẫu dựng sẵn', async () => {
+    const sid = rid(); await call('PUT', `/api/submissions/${sid}`, { token: P.accessToken, body: { itemType: 'quiz', itemId: qP, answers: { 'mcq-1': ['A'] } } });
+    aiReply = { summary: 'Tóm tắt', weakTopics: [], mistakes: [], studyPlan: [] };
+    const r = await call('POST', `/api/submissions/${sid}/ai-analyze`, { token: P.accessToken, body: {} }); assert.equal(r.status, 200, JSON.stringify(r.json));
+    let p = lastPrompt(); assert.ok(p.startsWith('MARK-QUIZ-A')); assert.ok(p.includes('[SAI] Câu 1') && p.includes('Câu 1: SAI') && p.includes('Điểm:') && p.includes('"weakTopics"'));
+    assert.equal(r.json.submission.aiAnalyses[0].promptName, 'Phân tích sâu');
+    // bob phân tích bài chia sẻ của alice → prompt của alice, không lộ tên
+    const bs = rid(); await call('PUT', `/api/shares/${qShare}/submissions/${bs}`, { token: B.accessToken, body: { answers: { 'mcq-1': ['A'] } } });
+    const rb = await call('POST', `/api/submissions/${bs}/ai-analyze`, { token: B.accessToken, body: {} }); assert.equal(rb.status, 200, JSON.stringify(rb.json));
+    assert.ok(lastPrompt().startsWith('MARK-QUIZ-A')); assert.ok(!JSON.stringify(rb.json).includes('Phân tích sâu'));
+    // xoá prompt → bài vẫn phân tích được bằng mẫu dựng sẵn
+    assert.equal((await call('DELETE', `/api/prompts/${pQuiz}`, { token: P.accessToken })).status, 200);
+    const s3 = rid(); await call('PUT', `/api/submissions/${s3}`, { token: P.accessToken, body: { itemType: 'quiz', itemId: qP, answers: {} } });
+    const r3 = await call('POST', `/api/submissions/${s3}/ai-analyze`, { token: P.accessToken, body: {} }); assert.equal(r3.status, 200, JSON.stringify(r3.json));
+    p = lastPrompt(); assert.ok(!p.includes('MARK-QUIZ-A') && p.startsWith('Bạn là giảng viên hướng dẫn học tập')); assert.ok(!('promptName' in r3.json.submission.aiAnalyses[0]));
   });
 
   console.log('Ảnh mã hoá + tự sinh repo');

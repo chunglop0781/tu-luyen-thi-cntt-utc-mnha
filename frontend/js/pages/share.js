@@ -95,7 +95,7 @@ export async function shareHistoryPage(ctx, sid) {
 /** #/lessons/<id bài>/(share|history|play)?id=<id chủ bài> — tra ra shareId rồi mở đúng trang. */
 export async function lessonLinkPage(ctx, m) {
   const [, itemId, page] = m, owner = ctx.query.get('id') || '';
-  if (!/^[a-f0-9]{16,32}$/.test(owner)) throw new Error('Link chia sẻ thiếu id người tạo (?id=…)');
+  if (!/^(?:[a-f0-9]{16,32}|\d{10,14}_[a-f0-9]{8,24})$/.test(owner)) throw new Error('Link chia sẻ thiếu id người tạo (?id=…)');
   const { shareId } = await get(`/api/share-link/${owner}/${itemId}`);
   return page === 'history' ? shareHistoryPage(ctx, shareId) : page === 'play' ? sharePlayPage(ctx, shareId) : sharePage(ctx, shareId);
 }

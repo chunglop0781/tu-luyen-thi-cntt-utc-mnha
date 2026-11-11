@@ -65,7 +65,7 @@ Trang **Cài đặt → Kiểm tra kết nối** chạy `/api/health?deep=1` nga
 - Chống dò mật khẩu/spam chỉ ở mức RAM từng instance (serverless không có bộ nhớ chung) — đủ cho dùng cá nhân/nhóm nhỏ.
 
 ## Tính năng
-Tạo/sửa/xoá bài **tự luận** (đề, đáp án mẫu — dán HTML do AI sinh từ ảnh đề bằng prompt mẫu có sẵn, tiêu chí từ khoá, ảnh, đếm giờ) và **trắc nghiệm 3 phần** chuyển nguyên từ bản cũ `luyen-thi-cntt-utc-mnha`: Phần 1 nhiều đáp án, Phần 2 Đúng/Sai theo từng ý (chia đều hoặc THPTQG), Phần 3 điền số liệu (sai số, nhiều cách viết); dán 3 khối text theo quy luật `- câu / +) đáp án / => đáp án / ++) giải thích`, câu hỏi chùm `*)/1-3/`, `//image:`, prompt mẫu nhờ AI tạo đề, audio bài nghe, **xáo trộn thứ tự câu** (câu chùm đi liền nhau), đếm giờ + chuông, đánh dấu câu, nháp tự lưu · tự luận: chấm bằng AI bằng **key của chính bạn** · trắc nghiệm: **Phân tích AI** (chủ đề hay sai, vì sao sai từng câu, kế hoạch ôn; tối đa 5 lần/bài nộp, giãn cách 30 giây) · lịch sử bài nộp · xuất JSON · dựng lại chỉ mục.
+Tạo/sửa/xoá bài **tự luận** (đề, đáp án mẫu — dán HTML do AI sinh từ ảnh đề bằng prompt mẫu có sẵn, tiêu chí từ khoá, ảnh, đếm giờ) và **trắc nghiệm 3 phần** chuyển nguyên từ bản cũ `luyen-thi-cntt-utc-mnha`: Phần 1 nhiều đáp án, Phần 2 Đúng/Sai theo từng ý (chia đều hoặc THPTQG), Phần 3 điền số liệu (sai số, nhiều cách viết); dán 3 khối text theo quy luật `- câu / +) đáp án / => đáp án / ++) giải thích`, câu hỏi chùm `*)/1-3/`, `//image:`, prompt mẫu nhờ AI tạo đề, audio bài nghe, **xáo trộn thứ tự câu** (câu chùm đi liền nhau), đếm giờ + chuông, đánh dấu câu, nháp tự lưu · tự luận: chấm bằng AI bằng **key của chính bạn** · trắc nghiệm: **Phân tích AI** (chủ đề hay sai, vì sao sai từng câu, kế hoạch ôn; tối đa 5 lần/bài nộp, giãn cách 30 giây) · lịch sử bài nộp (trang `#/quiz|essay/<id>/history`: thống kê + biểu đồ điểm theo thời gian như luyen-thi) · xuất JSON · dựng lại chỉ mục.
 Không có trong bản này (so với bản cũ): MongoDB, admin/duyệt user, slide/video/flashcard/tài liệu, Cloudinary.
 Thanh trên cùng hiện **email đăng nhập** (tài khoản cũ chưa có email thì hiện tên đăng nhập).
 
@@ -95,3 +95,8 @@ npm test            # 48 kịch bản tích hợp với GitHub giả lập (khô
 npm run test:ui     # trình duyệt thật (Playwright): đăng nhập bằng email, Cài đặt → Nhà cung cấp AI, tạo/làm đề 3 phần, chấm & phân tích AI
 ```
 Sandbox khi kiểm thử không có mạng nên `bcryptjs` được thay bằng bản giả trong `backend/test/stubs` (cùng API `hash/compare`); **khi chạy thật Vercel cài `bcryptjs` thật** từ `package.json`. Thư mục `test/` không ảnh hưởng khi deploy.
+
+## Prompt AI riêng & id bài
+- Trang **Prompt AI** (`#/prompts`): mỗi tài khoản tự tạo prompt **chấm tự luận** (`essay`) và **phân tích trắc nghiệm** (`quiz`), lưu ở `u/<uid>/prompts.json` (repo data). Mỗi loại có thể đặt 1 prompt mặc định. Biến: tự luận `{đề_bài} {bài_làm} {lời_giải_mẫu} {rubric} {max_score} {strictness} {student_name}`; trắc nghiệm `{đề_trắc_nghiệm} {bài_làm} {kết_quả} {max_score} {student_name}`. Phần JSON trả về và quy tắc "nội dung là dữ liệu" do hệ thống tự nối.
+- Trong trình soạn, chọn prompt cho từng bài (`promptId`). Bài chia sẻ: người làm bấm chấm/phân tích bằng **key của chính họ** nhưng dùng **prompt của chủ bài** (bài không gắn thì dùng prompt mặc định của chủ bài); người làm không thấy tên hay nội dung prompt.
+- Id bài/bài nộp/prompt mới có dạng `<timestamp ms>_<hex ngẫu nhiên>` (vd `1731289315790_9f3a1c07b2d4`), file `u/<uid>/essays/<id>.json` và `"id"` trùng nhau. Id cũ 16 hex vẫn dùng được.

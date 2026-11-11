@@ -1,5 +1,6 @@
 import { get, put, post, uploadImage, newId, imageUrl, imageCtx } from '../api.js';
 import { h, toast, spinner } from '../ui.js';
+import { promptPicker } from './prompts.js';
 import { mountQuizEditor } from '../../legacy/quizEditor.js';
 import { mountQuizTake } from '../../legacy/quizTake.js';
 
@@ -124,11 +125,13 @@ export async function quizEditorPage(ctx, id) {
   const isNew = !id; id = id || newId();
   const [{ config: cfg }, ov, itemR, subsR] = await Promise.all([get('/api/quizzes/config'), get('/api/overview').catch(() => ({ subjects: [] })), isNew ? null : get(`/api/quizzes/${id}`), isNew ? null : get(`/api/submissions?itemId=${id}`).catch(() => ({ submissions: [] }))]);
   const item = itemR ? itemR.item : null;
+  const picker = await promptPicker('quiz', item && item.promptId);
   const root = h('div'); root.innerHTML = editorHtml({ mode: isNew ? 'create' : 'edit', item, cfg, subjects: ov.subjects || [], submissionCount: subsR ? subsR.submissions.length : 0 });
+  root.prepend(h('div', { class: 'card' }, picker.el));      // chọn prompt phân tích AI (nằm ngoài form của trình soạn; id gắn lúc lưu)
   const stopImg = watchEncryptedImages(root);
   const CFG = { mode: isNew ? 'create' : 'edit', lessonId: id, parts: (item && item.parts) || {}, raw: (item && item.raw) || { mcq: '', tf: '', fill: '' }, authoringPrompt: cfg.authoringPrompt, allowedImageHosts: cfg.allowedImageHosts, audioUrl: (item && item.audioUrl) || '', allowedAudioHosts: cfg.allowedAudioHosts, maxOptions: cfg.maxOptions, tfScoring: (item && item.parts && item.parts.tf && item.parts.tf.scoring) || 'equal', tfMinStatements: cfg.tfMinStatements, tfMaxStatements: cfg.tfMaxStatements, tfThptqgStatements: cfg.tfThptqgStatements, defaults: cfg.defaults, durationLimits: cfg.durationLimits };
   const bridge = {
-    save: async (body) => { try { await put(`/api/quizzes/${id}`, body, { retry: true }); } catch (e) { const err = new Error(e.message); err.errors = e.errors; throw err; } },
+    save: async (body) => { try { await put(`/api/quizzes/${id}`, { ...body, promptId: picker.value() }, { retry: true }); } catch (e) { const err = new Error(e.message); err.errors = e.errors; throw err; } },
     done: () => { if (ctx.isCurrent()) ctx.go('/'); },     // chỉ quay về nếu người dùng chưa rời trang
     uploadImage: (blob, name) => uploadImage(new File([blob], name || 'anh', { type: blob.type })),
   };

@@ -5,7 +5,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nowIso = () => new Date().toISOString();
 const randomId = (bytes = 8) => crypto.randomBytes(bytes).toString('hex');
 /** id do client/server sinh: 16–32 ký tự hex thường. */
-const ID_RE = /^[a-f0-9]{16,32}$/;
+/** id mới: <timestamp ms>_<hex ngẫu nhiên> (vd 1731289315790_9f3a1c07b2d4); id cũ 16–32 hex vẫn hợp lệ. */
+const ID_RE = /^(?:[a-f0-9]{16,32}|\d{10,14}_[a-f0-9]{8,24})$/;
+const newItemId = () => `${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
 const isId = (s) => typeof s === 'string' && ID_RE.test(s);
 
 /** Chuẩn hoá để so khớp từ khoá: bỏ dấu, chữ thường, gộp khoảng trắng. */
@@ -32,4 +34,4 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
-module.exports = { sleep, nowIso, randomId, isId, ID_RE, fold, clampStr, mapLimit };
+module.exports = { sleep, nowIso, randomId, newItemId, isId, ID_RE, fold, clampStr, mapLimit };

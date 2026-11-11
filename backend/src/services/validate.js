@@ -32,7 +32,7 @@ function sanitizeEssay(input) {
   const untimed = input.timerMode === 'untimed' || input.duration === null || input.duration === undefined || input.duration === '' || input.duration === 'null';
   const d = Number(input.duration);
   if (!untimed && !(Number.isInteger(d) && d >= 1 && d <= 600)) throw bad('Thời gian làm bài phải là số phút nguyên từ 1 đến 600 (hoặc chọn “Không đếm giờ”).');
-  return { ...base, prompt, modelAnswer, maxScore, rubric, duration: untimed ? null : d, images: imageRefs(prompt, modelAnswer) };
+  return { ...base, prompt, modelAnswer, maxScore, rubric, duration: untimed ? null : d, images: imageRefs(prompt, modelAnswer), promptId: input.promptId || null };
 }
 
 const { parsePart, serializePart } = require('./quiz/parser');
@@ -94,7 +94,7 @@ function sanitizeQuiz(input) {
   if (!untimed && !(Number.isInteger(d) && d >= 1 && d <= 600)) throw bad('Thời gian làm bài phải là số phút nguyên từ 1 đến 600 (hoặc chọn “Không đếm giờ”).');
   const audio = normalizeAudioUrl(input.audioUrl); if (audio.error) throw bad(audio.error);
   const contentHtml = sanitizeExplanationHtml(clampStr(input.contentHtml, 20000), { maxLength: 20000 });
-  const out = { ...base, contentHtml, duration: untimed ? null : d, shuffle: !!input.shuffle, maxScore: built.maxScore, parts: built.parts, images: imageRefs(JSON.stringify(built.parts), contentHtml) };
+  const out = { ...base, promptId: input.promptId || null, contentHtml, duration: untimed ? null : d, shuffle: !!input.shuffle, maxScore: built.maxScore, parts: built.parts, images: imageRefs(JSON.stringify(built.parts), contentHtml) };
   if (audio.url) out.audioUrl = audio.url;
   return out;
 }

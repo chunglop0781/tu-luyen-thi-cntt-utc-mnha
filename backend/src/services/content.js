@@ -9,6 +9,7 @@ const qcfg = require('./quiz/config');
 const { gradeEssay } = require('./gemini');
 const { callAi } = require('./ai');
 const { analyzeQuiz } = require('./analysis');
+const { createPrompts } = require('./prompts');
 const { PRESETS, MAX_PROVIDERS, geminiProvider, normalizeProviderInput, sanitizeDocument, findProvider, safeModel, publicProvider, publicPresets } = require('../aiModels');
 const { encryptText, decryptText, deriveKey } = require('../crypto');
 
@@ -26,6 +27,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   const vaultPath = (uid) => `private/${uid}/vault.json`;
   const aiDocPath = (uid) => `AI-database/${uid}/index.json`;   // nhà cung cấp AI của TỪNG tài khoản (repo ACCOUNT, không chứa key)
   const emptyIndex = () => ({ items: {}, subs: [] });
+  const prompts = createPrompts({ store });
 
   const mustId = (id) => { if (!isId(id)) throw new HttpError(400, 'id không hợp lệ', 'BAD_ID'); return id; };
   const mustType = (t) => { if (!TYPES[t]) throw new HttpError(400, 'Loại bài không hợp lệ', 'BAD_TYPE'); return t; };
@@ -70,6 +72,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   async function putItem(uid, type, id, input) {
     mustType(type); mustId(id);
     const clean = type === 'essay' ? sanitizeEssay(input || {}) : sanitizeQuiz(input || {});
+    clean.promptId = await prompts.assertUsable(uid, type, clean.promptId);   // chỉ gắn prompt có thật, đúng loại (null = dùng mặc định)
     const exist = await store.read('data', itemPath(uid, type, id), { fresh: true });
     const now = nowIso();
     const item = { id, ...clean, ownerId: uid, createdAt: exist ? exist.data.createdAt : now, updatedAt: now };
@@ -204,6 +207,18 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { provider: provider.id, label: provider.label, model: r.model, response: r.text.trim().slice(0, 60), ms: Date.now() - t0, ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}) };
   }
 
+  /** Prompt cho một bài nộp. Bài của chính mình: prompt gắn với bài → mặc định của mình. Bài từ link chia sẻ: prompt mà CHỦ BÀI đã gắn cho bài đó (không dùng prompt của người làm); không còn thì dùng mẫu dựng sẵn. */
+  async function promptFor(uid, sub) {
+    let owner = uid, itemId = sub.itemId;
+    if (sub.shareId) {
+      const r = isId(sub.shareId) ? await store.read('data', sharePath(sub.shareId)).catch(() => null) : null;
+      if (!r) return null;
+      owner = r.data.ownerId; itemId = r.data.itemId;
+    }
+    const it = isId(itemId) ? await store.read('data', itemPath(owner, sub.type, itemId)).catch(() => null) : null;
+    return prompts.resolve(owner, sub.type, it && it.data.promptId).catch(() => null);
+  }
+
   /** Chấm AI bài tự luận bằng nhà cung cấp + key của CHÍNH người nộp. Bài từ link chia sẻ chỉ được chấm một lần (không "chấm lại cho tới khi cao điểm") và điểm được đẩy lên biểu đồ chung. */
   async function aiGrade(uid, id, wanted = {}) {
     const sub = await getSubmission(uid, id);
@@ -213,8 +228,10 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     if (shared && sub.ai) throw already();
     const { provider, apiKey, model } = await resolveAi(uid, wanted);
     const essay = { prompt: sub.snapshot.prompt, modelAnswer: sub.snapshot.modelAnswer, rubric: sub.snapshot.rubric, maxScore: sub.snapshot.maxScore };
-    const ai = await gradeEssay({ provider, apiKey, model, essay, answer: sub.text, fetchImpl, lookup });
+    const pr = await promptFor(uid, sub);
+    const ai = await gradeEssay({ provider, apiKey, model, essay, answer: sub.text, template: pr && pr.content, strictness: pr && pr.strictness, studentName: wanted.studentName, fetchImpl, lookup });
     ai.at = nowIso();
+    if (pr && !shared) ai.promptName = pr.name;      // bài chia sẻ: không lộ tên/nội dung prompt của chủ bài
     const next = await store.update('data', subPath(uid, id), (s) => { if (shared && s.ai) throw already(); s.ai = ai; if (s.selfScore == null) s.score = ai.score; return s; }, { message: `ai-grade ${id}` });
     if (next.score != null) await patchIndexSub(uid, id, next.score, next.max);
     if (shared && next.score != null) await setResultScore(shared, { id, uid, n: String(wanted.studentName || '').slice(0, 60), at: next.submittedAt, score: next.score, max: next.max });
@@ -230,8 +247,9 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     const last = list.length ? Date.parse(list[list.length - 1].at) : 0;
     if (last && Date.now() - last < ANALYSIS_COOLDOWN_MS) throw new HttpError(429, `Vui lòng chờ ${Math.ceil((ANALYSIS_COOLDOWN_MS - (Date.now() - last)) / 1000)} giây rồi thử lại`, 'COOLDOWN');
     const { provider, apiKey, model } = await resolveAi(uid, wanted);
-    const out = await analyzeQuiz({ provider, apiKey, model, sub, studentName: wanted.studentName, fetchImpl, lookup });
-    const entry = { id: `an_${Date.now()}`, at: nowIso(), ...out };
+    const pr = await promptFor(uid, sub);
+    const out = await analyzeQuiz({ provider, apiKey, model, sub, studentName: wanted.studentName, template: pr && pr.content, fetchImpl, lookup });
+    const entry = { id: `an_${Date.now()}`, at: nowIso(), ...out, ...(pr && !sub.shareId ? { promptName: pr.name } : {}) };
     const next = await store.update('data', subPath(uid, id), (s) => {
       const cur = Array.isArray(s.aiAnalyses) ? s.aiAnalyses : [];
       if (cur.length >= MAX_ANALYSES) throw new HttpError(429, `Đã phân tích tối đa ${MAX_ANALYSES} lần cho bài nộp này`, 'LIMIT');
@@ -549,10 +567,10 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     const ov = await overview(uid);
     const items = await mapLimit(ov.items.slice(0, 400), 5, (i) => getItem(uid, i.type, i.id).catch(() => null));
     const subs = await mapLimit(ov.recent.length ? (await getIndex(uid)).subs.slice(0, 300) : [], 5, (s) => getSubmission(uid, s.id).catch(() => null));
-    return { exportedAt: nowIso(), items: items.filter(Boolean), submissions: subs.filter(Boolean) };
+    return { exportedAt: nowIso(), items: items.filter(Boolean), submissions: subs.filter(Boolean), prompts: await prompts.list(uid).catch(() => []) };
   }
 
-  return { overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, resolveShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
+  return { prompts, overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, resolveShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
 }
 
 module.exports = { createContent };

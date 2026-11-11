@@ -7,6 +7,8 @@ import { essayPractice } from './pages/practice.js';
 import { quizEditorPage, quizPracticePage } from './pages/quiz.js';
 import { submissionPage } from './pages/submission.js';
 import { settingsPage, aiSettingsPage } from './pages/settings.js';
+import { promptsPage, promptEditorPage } from './pages/prompts.js';
+import { itemHistoryPage } from './pages/itemHistory.js';
 import { sharePage, sharePlayPage, shareHistoryPage, lessonLinkPage } from './pages/share.js';
 
 // Định tuyến bằng #hash → đổi trang / tải lại luôn chạy được trên GitHub Pages (không cần server rewrite).
@@ -14,19 +16,23 @@ const routes = [
   [/^\/login$/, loginPage, { guest: true }],
   [/^\/$/, homePage],
   [/^\/history$/, historyPage],
+  [/^\/prompts$/, promptsPage],
+  [/^\/prompts\/new$/, (c) => promptEditorPage(c, null)],
+  [/^\/prompts\/([a-f0-9_]+)\/edit$/, (c, m) => promptEditorPage(c, m[1])],
   [/^\/settings$/, settingsPage],
   [/^\/settings\/ai$/, aiSettingsPage],
   [/^\/essay\/new$/, (c) => essayEditor(c, null)],
-  [/^\/essay\/([a-f0-9]+)\/edit$/, (c, m) => essayEditor(c, m[1])],
-  [/^\/essay\/([a-f0-9]+)$/, (c, m) => essayPractice(c, m[1])],
+  [/^\/essay\/([a-f0-9_]+)\/edit$/, (c, m) => essayEditor(c, m[1])],
+  [/^\/essay\/([a-f0-9_]+)$/, (c, m) => essayPractice(c, m[1])],
   [/^\/quiz\/new$/, (c) => quizEditorPage(c, null)],
-  [/^\/quiz\/([a-f0-9]+)\/edit$/, (c, m) => quizEditorPage(c, m[1])],
-  [/^\/quiz\/([a-f0-9]+)$/, (c, m) => quizPracticePage(c, m[1])],
-  [/^\/submission\/([a-f0-9]+)$/, (c, m) => submissionPage(c, m[1])],
-  [/^\/s\/([a-f0-9]+)$/, (c, m) => sharePage(c, m[1])],
-  [/^\/s\/([a-f0-9]+)\/play$/, (c, m) => sharePlayPage(c, m[1])],
-  [/^\/s\/([a-f0-9]+)\/history$/, (c, m) => shareHistoryPage(c, m[1])],
-  [/^\/lessons\/([a-f0-9]+)\/(share|history|play)$/, lessonLinkPage],
+  [/^\/quiz\/([a-f0-9_]+)\/edit$/, (c, m) => quizEditorPage(c, m[1])],
+  [/^\/quiz\/([a-f0-9_]+)$/, (c, m) => quizPracticePage(c, m[1])],
+  [/^\/submission\/([a-f0-9_]+)$/, (c, m) => submissionPage(c, m[1])],
+  [/^\/(quiz|essay)\/([a-f0-9_]+)\/history$/, (c, m) => itemHistoryPage(c, m[1], m[2])],
+  [/^\/s\/([a-f0-9_]+)$/, (c, m) => sharePage(c, m[1])],
+  [/^\/s\/([a-f0-9_]+)\/play$/, (c, m) => sharePlayPage(c, m[1])],
+  [/^\/s\/([a-f0-9_]+)\/history$/, (c, m) => shareHistoryPage(c, m[1])],
+  [/^\/lessons\/([a-f0-9_]+)\/(share|history|play)$/, lessonLinkPage],
 ];
 
 const app = document.getElementById('app'), top = document.getElementById('top'), conn = document.getElementById('conn');
@@ -37,12 +43,12 @@ export const go = (path) => { location.hash = '#' + path; };
 function renderTop() {
   const s = session.get();
   const cur = '#' + (location.hash.replace(/^#/, '').split('?')[0] || '/');
-  const link = (href, text) => h('a', { href, class: cur === href || (href === '#/settings' && cur.startsWith('#/settings')) ? 'on' : '' }, text);
+  const link = (href, text) => h('a', { href, class: cur === href || (href === '#/settings' && cur.startsWith('#/settings')) || (href === '#/prompts' && cur.startsWith('#/prompts')) ? 'on' : '' }, text);
   top.hidden = !s;                                  // chưa đăng nhập: trang đăng nhập tự có logo riêng
   top.replaceChildren(
     h('a', { class: 'brand', href: '#/' }, logo(), h('div', null, h('b', null, 'Tự luyện thi của mnha'))),
     s ? h('nav', null,
-      link('#/', 'Bài của tôi'), link('#/history', 'Lịch sử'), link('#/settings', 'Cài đặt'),
+      link('#/', 'Bài của tôi'), link('#/history', 'Lịch sử'), link('#/prompts', 'Prompt AI'), link('#/settings', 'Cài đặt'),
       h('span', { class: 'me' }, h('span', { class: 'avatar' }, (s.user.email || s.user.displayName || s.user.username || '?').trim().charAt(0).toUpperCase()),
         h('span', { class: 'who', title: s.user.email || s.user.username }, s.user.email || s.user.username),   // email đăng nhập; tài khoản cũ chưa có email thì hiện tên đăng nhập
         h('button', { class: 'btn small ghost', onclick: async () => { await logout(); go('/login'); } }, 'Đăng xuất'))) : null,

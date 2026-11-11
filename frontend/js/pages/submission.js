@@ -85,7 +85,7 @@ function essayView(s, set, aiInfo) {
 function aiGradePanel(s, set, info) {
   const lab = (p) => (info ? (info.providers.find((x) => x.id === p) || { label: p }).label : p);
   const result = s.ai ? h('div', null,
-    h('p', null, h('b', null, `${s.ai.score}/${s.max}`), ' · ', `${s.ai.provider ? lab(s.ai.provider) + ' · ' : ''}${s.ai.model}`, s.ai.fallbackFrom ? h('small', { class: 'muted' }, ` (model ${s.ai.fallbackFrom} quá tải, đã tự chuyển)`) : null),
+    h('p', null, h('b', null, `${s.ai.score}/${s.max}`), ' · ', `${s.ai.provider ? lab(s.ai.provider) + ' · ' : ''}${s.ai.model}`, s.ai.promptName ? ` · prompt “${s.ai.promptName}”` : '', s.ai.fallbackFrom ? h('small', { class: 'muted' }, ` (model ${s.ai.fallbackFrom} quá tải, đã tự chuyển)`) : null),
     h('p', null, s.ai.feedback),
     s.ai.strengths.length ? h('p', null, '👍 ', s.ai.strengths.join('; ')) : null, s.ai.weaknesses.length ? h('p', null, '⚠️ ', s.ai.weaknesses.join('; ')) : null) : null;
   const card = (...kids) => h('div', { class: 'card stack' }, h('h3', null, 'Chấm bằng AI'), result, ...kids);
@@ -126,7 +126,7 @@ function analysisCard(a, no, info) {
   const r = a.result || {};
   return h('div', { class: 'card an stack' },
     h('h3', null, `🤖 Phân tích AI #${no}`),
-    h('div', { class: 'muted' }, h('span', { class: 'tag' }, `${a.provider ? lab(a.provider) + ' · ' : ''}${a.model}`), a.at ? fmtDate(a.at) : '', a.fallbackFrom ? ` · model ${a.fallbackFrom} quá tải, đã tự chuyển` : ''),
+    h('div', { class: 'muted' }, h('span', { class: 'tag' }, `${a.provider ? lab(a.provider) + ' · ' : ''}${a.model}`), a.promptName ? h('span', { class: 'tag' }, `prompt: ${a.promptName}`) : null, a.at ? fmtDate(a.at) : '', a.fallbackFrom ? ` · model ${a.fallbackFrom} quá tải, đã tự chuyển` : ''),
     r.summary ? h('div', null, h('h4', null, 'Tổng quan'), h('div', { class: 'sum' }, r.summary)) : null,
     (r.weakTopics || []).length ? h('div', null, h('h4', null, `📚 Chủ đề cần ôn (${r.weakTopics.length})`),
       ...r.weakTopics.map((t) => h('div', { class: 'item' }, h('b', null, t.topic), t.wrongCount != null ? h('span', { class: 'muted' }, ` — sai ${t.wrongCount} câu`) : null,
