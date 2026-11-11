@@ -1,6 +1,7 @@
 import { get, put, post, uploadImage, newId, imageUrl, imageCtx } from '../api.js';
 import { h, toast, spinner } from '../ui.js';
 import { promptPicker } from './prompts.js';
+import { historyBtnHtml, historyTarget } from '../historyBtn.js';
 import { mountQuizEditor } from '../../legacy/quizEditor.js';
 import { mountQuizTake } from '../../legacy/quizTake.js';
 
@@ -194,6 +195,7 @@ function takeHtml(item, view, cfg) {
       <button type="button" id="qxStartBtn" class="qx-start-btn">${cfg.resume ? '▶ TIẾP TỤC LÀM BÀI' : '▶ BẮT ĐẦU LÀM BÀI'}</button></div></div>
     <div id="audioBar" class="audio-bar locked"><div class="audio-bar-icon">🔊</div><div class="audio-bar-info"><div class="title">Chuông báo hết giờ<span id="audioBadge" class="audio-badge">🔒 Đang khoá</span></div><div class="desc">Chỉ tự động reo lặp khi đồng hồ về 00:00 — tự tắt khi bạn nộp bài.</div></div>
       <audio id="timeUpAudio" controls preload="auto" src="musics/iphone-17-pro-max.mp3">Trình duyệt của bạn không hỗ trợ thẻ audio.</audio></div>
+    ${historyBtnHtml(cfg.historyHref, cfg.historyOwner)}
     <div id="lockMessage" class="lock-msg"></div>
     <section class="exam-bar"><div class="student-info"><strong>${who}</strong><span>Môn: ${esc(subjectName || '—')}</span><span>Bài: ${esc(item.title)}</span></div>
       <div class="exam-status"><div id="timerWrap" class="timer-wrap"><span class="timer-icon">◷</span><span id="timer">${untimed ? 'Không đếm giờ' : String(duration).padStart(2, '0') + ':00'}</span></div><span id="connectionDot" class="connection-dot"></span><span id="statusText" class="connection-text">Đang làm bài</span>
@@ -246,7 +248,7 @@ export async function quizPracticePage(ctx, id, opts = {}) {
   if (!draftRaw) order = null;                                   // lượt mới → xáo lại
   if (item.shuffle) { order = shuffleParts(view, order); try { localStorage.setItem(key, JSON.stringify(order)); } catch { /* bỏ qua */ } }
   const user = (sess.user || {});
-  const root = h('div'); root.innerHTML = takeHtml(item, view, { studentName: (user.displayName || user.username || 'THÍ SINH').toUpperCase(), resume: !!(draftRaw && draftRaw.endAt && Date.now() < draftRaw.endAt + 30 * 60 * 1000), ...(shared ? { backHref: `#/s/${shared}`, backText: '← Về trang bài chia sẻ (lịch sử & biểu đồ điểm)' } : {}) });
+  const root = h('div'); root.innerHTML = takeHtml(item, view, { studentName: (user.displayName || user.username || 'THÍ SINH').toUpperCase(), resume: !!(draftRaw && draftRaw.endAt && Date.now() < draftRaw.endAt + 30 * 60 * 1000), historyHref: historyTarget({ type: 'quiz', id, shareId: shared, ownShareId: item.shareId }), historyOwner: shared ? !!opts.isOwner : !!item.shareId, ...(shared ? { backHref: `#/s/${shared}`, backText: '← Về trang bài chia sẻ (lịch sử & biểu đồ điểm)' } : {}) });
   const stopImg = watchEncryptedImages(root);
   const CFG = { lessonId: id, title: item.title, duration: item.duration === null ? null : (item.duration || 20), maxScore: item.maxScore, readOnly: false, parts: view.parts, audioUrl: view.audioUrl || '', alarmSrc: 'musics/iphone-17-pro-max.mp3' };
   let dispose = null, started = false;

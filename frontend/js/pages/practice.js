@@ -1,5 +1,6 @@
 import { get, put, post, newId, imageCtx } from '../api.js';
 import { h, action, toast, richOrHtml } from '../ui.js';
+import { historyBtn, historyTarget } from '../historyBtn.js';
 
 const draftKey = (t, id) => `utc.draft.${t}.${id}`;
 const loadDraft = (k) => { try { return JSON.parse(localStorage.getItem(k)) || null; } catch { return null; } };
@@ -165,11 +166,12 @@ export async function essayPractice(ctx, id, opts = {}) {
     } catch (e) { toast(e.message, 'err'); busy = false; if (!up && connected) { submit.disabled = false; startTimer(); } submit.textContent = 'Nộp bài'; }
   });
 
-  const histHref = shared ? `#/s/${shared}/history` : `#/essay/${id}/history`;
+  const histHref = historyTarget({ type: 'essay', id, shareId: shared, ownShareId: item.shareId });
+  const histOwner = shared ? !!opts.isOwner : !!item.shareId;
   if (ready.length) setTimeout(() => checkBtn.click(), 0);          // tự kiểm tra kết nối khi vào trang
   return h('div', { class: 'ep-page' },
-    h('div', { class: 'row between', style: 'margin-bottom:12px' }, h('a', { class: 'btn ghost small', href: '#/' }, '← Quay lại'), h('a', { class: 'btn small', href: histHref }, '📊 Lịch sử làm bài')),
-    banner, aBar,
+    h('div', { class: 'row between', style: 'margin-bottom:12px' }, h('a', { class: 'btn ghost small', href: '#/' }, '← Quay lại')),
+    banner, aBar, historyBtn(histHref, histOwner),
     h('div', { class: 'ep-bar' },
       h('div', { class: 'info' }, h('div', { class: 'ic' }, '🤖'), h('div', null, h('div', { class: 'tt' }, 'Trạng thái AI chấm bài'), desc)),
       selBox, h('div', { class: 'ep-st' }, pill, checkBtn)),

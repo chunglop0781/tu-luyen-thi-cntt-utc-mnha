@@ -20,7 +20,7 @@ export async function homePage() {
       i.shareId ? h('p', { class: 'muted' }, '🔗 Đang chia sẻ · ', h('a', { href: `#/s/${i.shareId}/history` }, 'lịch sử của mọi người')) : null,
       h('div', { class: 'row' },
         h('a', { class: 'btn primary', href: `#/${i.type}/${i.id}` }, 'Làm bài'), h('a', { class: 'btn', href: edit }, 'Sửa'),
-        h('a', { class: 'btn', href: `#/${i.type}/${i.id}/history`, title: 'Lịch sử nộp & biểu đồ điểm của bài này' }, '📊 Lịch sử'),
+        h('a', { class: 'btn', href: i.shareId ? `#/s/${i.shareId}/history` : `#/${i.type}/${i.id}/history`, title: 'Lịch sử nộp & biểu đồ điểm của bài này' }, '📊 Lịch sử'),
         h('button', { class: 'btn', title: 'Tạo link chia sẻ bài này', onclick: async (ev) => { const b = ev.currentTarget; b.disabled = true; try { await openShareDialog(i, (sid) => { if (sid) { i.shareId = sid; draw(); } }); } catch (e) { toast(e.message, 'err', 6000); } finally { b.disabled = false; } } }, '🔗 Chia sẻ'),
         h('button', { class: 'btn ghost danger', onclick: async () => { if (!(await confirmBox(`Xoá "${i.title}"? Không khôi phục được.`))) return; try { await del(`/api/${i.type === 'quiz' ? 'quizzes' : 'essays'}/${i.id}`); ov.items = ov.items.filter((x) => x.id !== i.id); draw(); toast('Đã xoá', 'ok'); } catch (e) { toast(e.message, 'err'); } } }, 'Xoá')));
   };

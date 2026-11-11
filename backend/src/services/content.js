@@ -62,6 +62,14 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { items, subjects, shared: [...joined.values()].sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt))), recent: idx.subs.slice(0, 8), stats: { essays: items.filter((i) => i.type === 'essay').length, quizzes: items.filter((i) => i.type === 'quiz').length, submissions: idx.subs.length, avgQuizPct: avg } };
   }
 
+  /** shareId của một bài của mình (nếu đã chia sẻ) — để nút "Lịch sử làm bài" trỏ tới trang lịch sử của TẤT CẢ người làm. */
+  async function shareIdOf(uid, id) {
+    mustId(id);
+    const idx = await getIndex(uid);
+    const sid = idx.items && idx.items[id] && idx.items[id].shareId;
+    return sid && isId(sid) ? sid : null;
+  }
+
   async function getItem(uid, type, id) {
     mustType(type); mustId(id);
     const r = await store.read('data', itemPath(uid, type, id));
@@ -427,7 +435,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     const points = results.map((r) => {
       const t = Date.parse(r.at); const max = Number(r.max) || 10, raw = Number(r.score);
       const mine = r.uid === uid;
-      const pt = { t, s: round2(Math.max(0, Math.min(10, (raw / max) * 10))), raw, max, q: 1, m: mine ? 1 : 0 };
+      const pt = { t, s: round2(Math.max(0, Math.min(10, (raw / max) * 10))), raw, max, q: shareType(doc) === 'quiz' ? 1 : 0, m: mine ? 1 : 0 };
       if (isOwner) pt.n = r.n || '';
       else if (mine) pt.id = r.id;
       return pt;
@@ -570,7 +578,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { exportedAt: nowIso(), items: items.filter(Boolean), submissions: subs.filter(Boolean), prompts: await prompts.list(uid).catch(() => []) };
   }
 
-  return { prompts, overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, resolveShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
+  return { prompts, overview, shareIdOf, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, resolveShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
 }
 
 module.exports = { createContent };

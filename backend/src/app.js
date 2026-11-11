@@ -119,7 +119,7 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   router.get('/api/quizzes/config', async (ctx) => { authed(ctx); return { ok: true, config: quizPublicConfig() }; });   // prompt mẫu + giới hạn đề 3 phần
   router.post('/api/quizzes/parse', async (ctx) => { authed(ctx); return { ok: true, preview: previewQuiz(ctx.body) }; });   // xem trước / bắt lỗi đề 3 phần
   for (const [type, seg] of [['essay', 'essays'], ['quiz', 'quizzes']]) {
-    router.get(`/api/${seg}/:id`, async (ctx) => ({ ok: true, item: await content.getItem(authed(ctx).sub, type, ctx.params.id) }));
+    router.get(`/api/${seg}/:id`, async (ctx) => { const uid = authed(ctx).sub; const item = await content.getItem(uid, type, ctx.params.id); const shareId = await content.shareIdOf(uid, ctx.params.id).catch(() => null); return { ok: true, item: shareId ? { ...item, shareId } : item }; });
     router.put(`/api/${seg}/:id`, async (ctx) => ({ ok: true, item: await content.putItem(authed(ctx).sub, type, ctx.params.id, ctx.body) }));
     router.delete(`/api/${seg}/:id`, async (ctx) => { await content.deleteItem(authed(ctx).sub, type, ctx.params.id); return { ok: true }; });
   }

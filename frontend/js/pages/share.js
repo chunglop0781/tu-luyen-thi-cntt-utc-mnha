@@ -61,35 +61,57 @@ export async function sharePage(ctx, sid) {
 
 /** #/s/<id>/play — làm bài (đề không có đáp án; chấm phía máy chủ khi nộp). */
 export async function sharePlayPage(ctx, sid) {
-  const { item } = await get(`/api/shares/${sid}`);
-  if (item.type === 'essay') return essayPractice(ctx, sid, { shareId: sid, item });
-  return quizPracticePage(ctx, sid, { shareId: sid, item });
+  const { item, share } = await get(`/api/shares/${sid}`);
+  if (item.type === 'essay') return essayPractice(ctx, sid, { shareId: sid, item, isOwner: share.isOwner });
+  return quizPracticePage(ctx, sid, { shareId: sid, item, isOwner: share.isOwner });
 }
 
-/** #/s/<id>/history — giống trang "Lịch sử làm bài của tất cả sinh viên" của luyen-thi. */
+/** #/s/<id>/history — trang "Lịch sử làm bài" (bố cục chuyển từ views/student/lesson-history.pug của luyen-thi).
+ *  Chủ bài: thấy TÊN từng người đã nộp + ô tìm theo tên. Người làm: chỉ bài của mình, biểu đồ điểm cả lớp ẩn danh. */
+const PAGE_SIZE = 15;
 export async function shareHistoryPage(ctx, sid) {
   imageCtx.share = sid;
   const d = await get(`/api/shares/${sid}/history`);
   const own = d.share.isOwner;
   const stat = (v, l) => h('div', { class: 'stat' }, h('b', null, v), h('span', null, l));
-  const table = d.rows.length
-    ? h('div', { class: 'card tbl' }, h('table', null,
-      h('thead', null, h('tr', null, own ? h('th', null, 'Người làm') : null, h('th', null, 'Điểm'), h('th', null, 'Thời gian nộp'), own ? null : h('th', null, ''))),
-      h('tbody', null, d.rows.map((r) => {
-        const pending = r.score == null;
-        const pct = !pending && r.max ? (r.score / r.max) * 100 : null;
-        return h('tr', null, own ? h('td', null, r.n || '(không rõ tên)') : null,
-          h('td', null, pending ? h('span', { class: 'muted' }, 'Chờ chấm AI') : h('b', { class: pctClass(pct) }, `${r.score}/${r.max}`)), h('td', { class: 'muted' }, fmtDate(r.at)),
-          own ? null : h('td', null, r.id ? h('a', { class: 'btn small', href: `#/submission/${r.id}` }, 'Xem bài làm') : null));
-      }))))
-    : h('div', { class: 'card center' }, h('h3', null, 'Chưa có bài nộp nào'), h('p', { class: 'muted' }, own ? 'Khi có người làm bài qua link chia sẻ, kết quả sẽ hiện ở đây.' : 'Làm bài và nộp để xem lịch sử ở đây.'));
+  const norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+  let q = '', page = 1;
+  const listHost = h('div');
+  const status = (r) => (r.score == null ? h('span', { class: 'badge' }, 'Chờ chấm AI') : h('span', { class: 'badge quiz' }, 'Đã chấm'));
+  const draw = () => {
+    const rows = d.rows.filter((r) => !own || !q || norm(r.n).includes(norm(q)));
+    const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)); page = Math.min(page, pages);
+    const slice = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    listHost.replaceChildren(rows.length
+      ? h('div', { class: 'card tbl' }, h('table', null,
+        h('thead', null, h('tr', null, own ? h('th', null, 'Sinh viên') : null, h('th', null, 'Điểm'), h('th', null, 'Thời gian'), h('th', null, 'Trạng thái'), own ? null : h('th', null, ''))),
+        h('tbody', null, slice.map((r) => {
+          const pending = r.score == null;
+          const pct = !pending && r.max ? (r.score / r.max) * 100 : null;
+          return h('tr', null, own ? h('td', null, r.n ? h('b', null, r.n) : h('span', { class: 'muted' }, '(không rõ tên)')) : null,
+            h('td', null, pending ? h('span', { class: 'muted' }, '—') : h('b', { class: pctClass(pct) }, `${r.score}/${r.max}`)),
+            h('td', { class: 'muted' }, fmtDate(r.at)), h('td', null, status(r)),
+            own ? null : h('td', null, r.id ? h('a', { class: 'btn small', href: `#/submission/${r.id}` }, '👁 Xem chi tiết') : null));
+        }))),
+        pages > 1 ? h('div', { class: 'hist-pager' },
+          h('button', { class: 'btn small', type: 'button', disabled: page <= 1, onclick: () => { page--; draw(); } }, '← Trước'),
+          `Trang ${page} / ${pages}`,
+          h('button', { class: 'btn small', type: 'button', disabled: page >= pages, onclick: () => { page++; draw(); } }, 'Sau →')) : null)
+      : h('div', { class: 'card center' }, h('h3', null, own && q ? 'Không có bài nộp phù hợp' : 'Chưa có bài nộp nào'),
+        h('p', { class: 'muted' }, own ? 'Khi sinh viên nộp bài vào bài này, bài nộp sẽ hiện ở đây.' : 'Làm bài và nộp để xem lịch sử ở đây.')));
+  };
+  draw();
+  const search = own ? h('div', { class: 'hist-search' },
+    h('input', { type: 'text', placeholder: 'Tìm theo tên sinh viên…', oninput: (e) => { q = e.target.value.trim(); page = 1; draw(); } }),
+    h('button', { class: 'btn small ghost', type: 'button', onclick: (e) => { const i = e.target.parentNode.querySelector('input'); i.value = ''; q = ''; page = 1; draw(); } }, 'Xoá lọc')) : null;
   return h('div', { class: 'stack' },
     h('div', { class: 'row between' },
-      h('div', null, h('a', { href: `#/s/${sid}` }, '← Về bài chia sẻ'), h('h2', null, 'Lịch sử làm bài'), h('p', { class: 'muted' }, d.share.title, d.share.subject ? ` • ${d.share.subject}` : '', own ? ' • Bài nộp của tất cả người làm' : ' • Các lần bạn đã nộp')),
-      h('div', { class: 'row' }, d.share.enabled || !own ? h('a', { class: 'btn primary', href: `#/s/${sid}/play` }, '▶ Làm bài') : h('span', { class: 'badge' }, 'Đã tắt chia sẻ'))),
-    h('div', { class: 'stats' }, stat(d.stats.total, own ? 'Tổng bài nộp' : 'Số lần đã nộp'), d.stats.pending ? stat(d.stats.pending, 'Chờ AI chấm') : null, own ? stat(d.stats.students, 'Số người đã nộp') : null, stat(d.stats.best == null ? '—' : `${d.stats.best} / 10`, 'Điểm cao nhất (thang 10)')),
+      h('div', null, h('a', { href: d.share.enabled || !own ? `#/s/${sid}/play` : '#/' }, '← Quay lại bài học'), h('h2', null, 'Lịch sử làm bài'),
+        h('p', { class: 'muted' }, d.share.title, d.share.subject ? ` • ${d.share.subject}` : '', own ? ' • Bài nộp của tất cả sinh viên' : ' • Tất cả bài bạn đã nộp vào bài này')),
+      d.share.enabled || !own ? h('a', { class: 'btn primary', href: `#/s/${sid}/play` }, '✏️ Làm bài') : h('span', { class: 'badge' }, 'Đã tắt chia sẻ')),
+    h('div', { class: 'stats' }, stat(d.stats.total, own ? 'Tổng bài nộp' : 'Số lần đã nộp'), own ? stat(d.stats.students, 'Số sinh viên đã nộp') : null, d.stats.pending ? stat(d.stats.pending, 'Chờ AI chấm') : null, stat(d.stats.best == null ? '—' : `${d.stats.best} / 10`, 'Điểm cao nhất (thang 10)')),
     scoreChart({ isOwner: own, points: d.points, onOpen: (p) => ctx.go(`/submission/${p.id}`) }),
-    table);
+    search, listHost);
 }
 
 /** #/lessons/<id bài>/(share|history|play)?id=<id chủ bài> — tra ra shareId rồi mở đúng trang. */
