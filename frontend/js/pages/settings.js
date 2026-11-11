@@ -71,8 +71,13 @@ export async function aiSettingsPage() {
     } else {
       modelEl = h('select', { 'aria-label': 'Model' }, h('option', { value: '', selected: !it.model }, `Mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === it.model }, m)));
     }
+    // ★ Tên AI: tự đặt / sửa để sau này tìm lại (hiện trong ô chọn AI có tìm kiếm ở trang làm bài & chấm bài)
+    const nameEl = h('input', { value: it.name || '', placeholder: 'Đặt tên để dễ tìm, vd: Key Gemini của tôi', maxlength: 60, autocomplete: 'off', 'aria-label': 'Tên AI' });
+    const nameBtn = h('button', { class: 'btn small', type: 'button' }, it.name ? '✏️ Sửa tên' : '💾 Đặt tên');
+    nameBtn.addEventListener('click', action(nameBtn, async () => { await put('/api/me/vault', { providers: { [p.id]: { name: nameEl.value } } }); toast(nameEl.value.trim() ? 'Đã lưu tên AI' : 'Đã xoá tên AI', 'ok'); await reload(); }));
+    nameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); nameBtn.click(); } });
     const save = async (setDefault) => {
-      const body = { providers: { [p.id]: { model: (modelEl.value || '').trim() } } };
+      const body = { providers: { [p.id]: { model: (modelEl.value || '').trim(), name: nameEl.value } } };
       if (key.value.trim()) body.providers[p.id].key = key.value.trim();
       if (setDefault) body.provider = p.id;
       await put('/api/me/vault', body); key.value = '';
@@ -87,7 +92,7 @@ export async function aiSettingsPage() {
       let out;
       try {
         const r = (await post('/api/ai/test', { provider: p.id, model: (modelEl.value || '').trim() || undefined }, { timeout: 60000 })).result;
-        out = msg('ok', `✅ Kết nối được ${r.label} · model ${r.model} · ${r.ms}ms · AI trả lời: "${r.response}"${r.fallbackFrom ? ` (model ${r.fallbackFrom} quá tải nên tự chuyển sang ${r.model})` : ''}`);
+        out = msg('ok', `✅ Kết nối được ${r.name ? r.name + ' — ' : ''}${r.label} · model ${r.model} · ${r.ms}ms · AI trả lời: "${r.response}"${r.fallbackFrom ? ` (model ${r.fallbackFrom} quá tải nên tự chuyển sang ${r.model})` : ''}`);
       } catch (e) { out = msg('err', `❌ ${e.message}`); }
       result.replaceChildren(out);
     }));
@@ -100,9 +105,10 @@ export async function aiSettingsPage() {
 
     const card = h('div', { class: 'card stack prov' },
       h('div', { class: 'row between' },
-        h('h3', null, p.label, ' ', h('span', { class: 'badge' }, p.builtin ? 'dựng sẵn' : p.id), isDefault ? h('span', { class: 'badge quiz' }, 'mặc định') : null, it.keySet ? h('span', { class: 'badge good-b' }, '✓ có key') : h('span', { class: 'badge' }, 'chưa có key')),
+        h('h3', null, it.name ? it.name : p.label, ' ', it.name ? h('span', { class: 'badge' }, p.label) : null, h('span', { class: 'badge' }, p.builtin ? 'dựng sẵn' : p.id), isDefault ? h('span', { class: 'badge quiz' }, 'mặc định') : null, it.keySet ? h('span', { class: 'badge good-b' }, '✓ có key') : h('span', { class: 'badge' }, 'chưa có key')),
         h('div', { class: 'row' }, editBtn, delBtn)),
       p.baseUrl ? h('p', { class: 'muted' }, h('code', null, p.baseUrl + p.chatPath)) : h('p', { class: 'muted' }, 'API Google Gemini (generateContent)'),
+      field('Tên AI', h('div', { class: 'row' }, nameEl, nameBtn), '(tự đặt để dễ tìm — để trống = dùng tên nhà cung cấp)'),
       h('div', { class: 'ai-grid' }, field('Model', modelEl, p.allowCustomModel ? '(chọn gợi ý hoặc tự gõ)' : ''), field(`API key ${p.label}`, withToggle(key))), extra,
       h('div', { class: 'row' }, saveBtn, testBtn, defBtn, it.keySet ? rmKey : null), result);
     return card;

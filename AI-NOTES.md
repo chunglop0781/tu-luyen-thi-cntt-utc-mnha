@@ -22,3 +22,7 @@ Khi cần một màn hình có sẵn ở bản cũ (`views/*.pug`, `public/js/*.
 - Chủ bài → "Lịch sử làm bài của tất cả sinh viên" (thấy tên từng người đã nộp, có ô tìm theo tên).
 - Người khác → "Lịch sử làm bài của tôi": chỉ thấy bài của mình; biểu đồ điểm của cả lớp **ẩn danh** (không tên, không id bài nộp).
 - Backend: `GET /api/shares/:sid/history` (`content.sharedHistory`) đã lo phần phân quyền này — đừng đưa tên/id của người khác xuống người làm.
+
+## 4. Tên AI + ô chọn AI có tìm kiếm
+- **Tên AI** = tên người dùng tự đặt / sửa cho key của từng nhà cung cấp (Cài đặt → Nhà cung cấp AI → ô "Tên AI"). Lưu ở kho key riêng tư: `vault.names[<providerId>]`, đọc ra `vault.items[id].name` (tối đa 60 ký tự, để trống = xoá tên). Bài tự luận được chấm sẽ ghi `ai.keyName` để biết sau này AI nào đã chấm.
+- **Ô chọn AI / model có tìm kiếm** là bản **chép nguyên** `public/js/subjectPicker.js` + `public/css/subject-picker.css` của luyen-thi (`legacy/subjectPicker.js`, `css/subject-picker.css`). Dùng qua `js/aiName.js` (`pickerAttrs`, `aiTitle`, `enhancePickers`). Chữ trong ô chọn là "Tên AI — Nhà cung cấp" nên gõ tên nào cũng tìm ra. Đừng viết lại bộ chọn khác.

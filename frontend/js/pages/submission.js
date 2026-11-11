@@ -1,5 +1,6 @@
 import { get, patch, post, del, imageCtx } from '../api.js';
 import { h, action, toast, rich, fmtDate, fmtDur, pctClass, confirmBox, safeHtml, richOrHtml } from '../ui.js';
+import { aiTitle, pickerAttrs, enhancePickers } from '../aiName.js';
 
 export async function submissionPage(ctx, id) {
   let { submission: s } = await get(`/api/submissions/${id}`);
@@ -85,7 +86,7 @@ function essayView(s, set, aiInfo) {
 function aiGradePanel(s, set, info) {
   const lab = (p) => (info ? (info.providers.find((x) => x.id === p) || { label: p }).label : p);
   const result = s.ai ? h('div', null,
-    h('p', null, h('b', null, `${s.ai.score}/${s.max}`), ' · ', `${s.ai.provider ? lab(s.ai.provider) + ' · ' : ''}${s.ai.model}`, s.ai.promptName ? ` · prompt “${s.ai.promptName}”` : '', s.ai.fallbackFrom ? h('small', { class: 'muted' }, ` (model ${s.ai.fallbackFrom} quá tải, đã tự chuyển)`) : null),
+    h('p', null, h('b', null, `${s.ai.score}/${s.max}`), ' · ', `${s.ai.keyName ? s.ai.keyName + ' — ' : ''}${s.ai.provider ? lab(s.ai.provider) + ' · ' : ''}${s.ai.model}`, s.ai.promptName ? ` · prompt “${s.ai.promptName}”` : '', s.ai.fallbackFrom ? h('small', { class: 'muted' }, ` (model ${s.ai.fallbackFrom} quá tải, đã tự chuyển)`) : null),
     h('p', null, s.ai.feedback),
     s.ai.strengths.length ? h('p', null, '👍 ', s.ai.strengths.join('; ')) : null, s.ai.weaknesses.length ? h('p', null, '⚠️ ', s.ai.weaknesses.join('; ')) : null) : null;
   const card = (...kids) => h('div', { class: 'card stack' }, h('h3', null, 'Chấm bằng AI'), result, ...kids);
@@ -100,11 +101,12 @@ function aiGradePanel(s, set, info) {
   let provSel, modelEl;
   const drawPick = () => {
     const p = info.providers.find((x) => x.id === cur), saved = (info.vault.items[cur] || {}).model || '';
-    provSel = h('select', { 'aria-label': 'Nhà cung cấp AI' }, ...ready.map((x) => h('option', { value: x.id, selected: x.id === cur }, x.label)));
+    provSel = h('select', { 'aria-label': 'AI', ...pickerAttrs('ai') }, ...ready.map((x) => h('option', { value: x.id, selected: x.id === cur }, aiTitle(x, info.vault.items[x.id]))));
     provSel.addEventListener('change', () => { cur = provSel.value; drawPick(); });
     if (p.allowCustomModel) modelEl = h('input', { list: 'ai-models-sub', value: saved, placeholder: `Model (mặc định: ${p.defaultModel})`, maxlength: 100, autocomplete: 'off', 'aria-label': 'Model' });
-    else modelEl = h('select', { 'aria-label': 'Model' }, h('option', { value: '', selected: !saved }, `Model mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === saved }, m)));
+    else modelEl = h('select', { 'aria-label': 'Model', ...pickerAttrs('model') }, h('option', { value: '', selected: !saved }, `Model mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === saved }, m)));
     row.replaceChildren(provSel, modelEl, p.allowCustomModel ? h('datalist', { id: 'ai-models-sub' }, ...p.models.map((m) => h('option', { value: m }))) : null, btn);
+    enhancePickers(row);
   };
   drawPick();
   btn.addEventListener('click', action(btn, async () => {

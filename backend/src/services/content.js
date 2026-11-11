@@ -204,15 +204,15 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     if (!apiKey) throw new HttpError(400, `Chưa lưu API key ${p.label} trong Cài đặt`, 'NO_AI_KEY');
     const asked = typeof wanted.model === 'string' ? wanted.model.trim() : '';
     if (asked && safeModel(p, asked) !== asked) throw new HttpError(400, `Model "${asked}" không dùng được với ${p.label}`, 'AI_MODEL');
-    return { provider: p, apiKey, model: safeModel(p, asked || v.items[p.id].model) };
+    return { provider: p, apiKey, model: safeModel(p, asked || v.items[p.id].model), keyName: v.items[p.id].name || '' };
   }
 
   /** Thử kết nối AI bằng một câu hỏi rất ngắn. */
   async function testAi(uid, wanted) {
-    const { provider, apiKey, model } = await resolveAi(uid, wanted);
+    const { provider, apiKey, model, keyName } = await resolveAi(uid, wanted);
     const t0 = Date.now();
     const r = await callAi({ provider, model, apiKey, prompt: 'Reply only with the word OK.', fetchImpl, lookup, timeoutMs: 12000, budgetMs: 40000 });
-    return { provider: provider.id, label: provider.label, model: r.model, response: r.text.trim().slice(0, 60), ms: Date.now() - t0, ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}) };
+    return { provider: provider.id, label: provider.label, ...(keyName ? { name: keyName } : {}), model: r.model, response: r.text.trim().slice(0, 60), ms: Date.now() - t0, ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}) };
   }
 
   /** Prompt cho một bài nộp. Bài của chính mình: prompt gắn với bài → mặc định của mình. Bài từ link chia sẻ: prompt mà CHỦ BÀI đã gắn cho bài đó (không dùng prompt của người làm); không còn thì dùng mẫu dựng sẵn. */
@@ -234,11 +234,12 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     const shared = sub.shareId && isId(sub.shareId) ? sub.shareId : null;
     const already = () => new HttpError(409, 'Bài làm từ link chia sẻ chỉ được chấm AI một lần', 'ALREADY_GRADED');
     if (shared && sub.ai) throw already();
-    const { provider, apiKey, model } = await resolveAi(uid, wanted);
+    const { provider, apiKey, model, keyName } = await resolveAi(uid, wanted);
     const essay = { prompt: sub.snapshot.prompt, modelAnswer: sub.snapshot.modelAnswer, rubric: sub.snapshot.rubric, maxScore: sub.snapshot.maxScore };
     const pr = await promptFor(uid, sub);
     const ai = await gradeEssay({ provider, apiKey, model, essay, answer: sub.text, template: pr && pr.content, strictness: pr && pr.strictness, studentName: wanted.studentName, fetchImpl, lookup });
     ai.at = nowIso();
+    if (keyName) ai.keyName = keyName;               // tên AI người dùng đặt — để sau này biết bài này do AI nào chấm
     if (pr && !shared) ai.promptName = pr.name;      // bài chia sẻ: không lộ tên/nội dung prompt của chủ bài
     const next = await store.update('data', subPath(uid, id), (s) => { if (shared && s.ai) throw already(); s.ai = ai; if (s.selfScore == null) s.score = ai.score; return s; }, { message: `ai-grade ${id}` });
     if (next.score != null) await patchIndexSub(uid, id, next.score, next.max);
@@ -494,7 +495,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     if (prev.builtin) throw new HttpError(400, 'Không xoá được Google Gemini (dựng sẵn)', 'AI_PROVIDER');
     await saveAiDoc(uid, list.filter((p) => p.id !== prev.id));
     await store.update('account', vaultPath(uid), (d) => {      // xoá luôn key + model đã lưu cho nhà này
-      if (!d) return undefined; if (d.keys) delete d.keys[prev.id]; if (d.models) delete d.models[prev.id]; if (d.provider === prev.id) d.provider = 'gemini'; return d;
+      if (!d) return undefined; if (d.keys) delete d.keys[prev.id]; if (d.models) delete d.models[prev.id]; if (d.names) delete d.names[prev.id]; if (d.provider === prev.id) d.provider = 'gemini'; return d;
     }, { message: `vault ${uid}` });
   }
 
@@ -507,7 +508,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
       const enc = (d.keys && d.keys[p.id]) || (p.id === 'gemini' ? d.geminiKeyEnc : '');   // d.geminiKeyEnc: dữ liệu bản cũ
       let key = '';
       if (enc) { try { key = decryptText(vkey(), enc, uid); } catch { key = ''; } }
-      items[p.id] = { keySet: !!key, model: (d.models && d.models[p.id]) || (p.id === 'gemini' ? d.geminiModel : '') || '' };
+      items[p.id] = { keySet: !!key, model: (d.models && d.models[p.id]) || (p.id === 'gemini' ? d.geminiModel : '') || '', name: (d.names && d.names[p.id]) || '' };   // name = tên AI do người dùng đặt (để tìm lại)
       if (key) keys[p.id] = key;
     }
     const provider = findProvider(list, d.provider) ? d.provider : 'gemini';
@@ -526,6 +527,11 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     for (const [id, v] of Object.entries(upd)) {
       const p = findProvider(list, id); if (!p) throw new HttpError(400, `Nhà cung cấp AI "${id}" chưa được thêm trong Cài đặt`, 'AI_PROVIDER');
       if (v.key) { const k = String(v.key).trim(); if (!KEY_RE.test(k)) throw new HttpError(400, `API key ${p.label} không hợp lệ (8–300 ký tự, không có khoảng trắng)`, 'VALIDATION'); v.key = k; }
+      if (v.name !== undefined) {                                   // Tên AI: tự đặt / sửa, tối đa 60 ký tự, '' = xoá tên
+        const nm = String(v.name == null ? '' : v.name).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (nm.length > 60) throw new HttpError(400, 'Tên AI tối đa 60 ký tự', 'VALIDATION');
+        v.name = nm;
+      }
       if (v.model !== undefined) {
         const m = String(v.model || '').trim();
         if (m && safeModel(p, m) !== m) throw new HttpError(400, `Model "${m}" không dùng được với ${p.label}`, 'AI_MODEL');
@@ -534,13 +540,14 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     }
     if (body.provider !== undefined && !findProvider(list, body.provider)) throw new HttpError(400, 'Nhà cung cấp AI không hợp lệ', 'AI_PROVIDER');
     await store.update('account', vaultPath(uid), (d) => {
-      d = d || {}; d.keys = d.keys || {}; d.models = d.models || {};
+      d = d || {}; d.keys = d.keys || {}; d.models = d.models || {}; d.names = d.names || {};
       if (d.geminiKeyEnc && !d.keys.gemini) d.keys.gemini = d.geminiKeyEnc;       // chuyển dữ liệu bản cũ
       if (d.geminiModel && d.models.gemini === undefined) d.models.gemini = d.geminiModel;
       delete d.geminiKeyEnc; delete d.geminiModel;
       for (const [id, v] of Object.entries(upd)) {
         if (v.key !== undefined) { if (v.key === '' || v.key === null) delete d.keys[id]; else d.keys[id] = encryptText(vkey(), v.key, uid); }
         if (v.model !== undefined) { if (v.model) d.models[id] = v.model; else delete d.models[id]; }
+        if (v.name !== undefined) { if (v.name) d.names[id] = v.name; else delete d.names[id]; }
       }
       if (body.provider !== undefined) d.provider = String(body.provider).toLowerCase();
       if (body.notes !== undefined) d.notes = String(body.notes).slice(0, 5000);

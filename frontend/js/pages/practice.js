@@ -1,6 +1,7 @@
 import { get, put, post, newId, imageCtx } from '../api.js';
 import { h, action, toast, richOrHtml } from '../ui.js';
 import { historyBtn, historyTarget } from '../historyBtn.js';
+import { aiTitle, pickerAttrs, enhancePickers } from '../aiName.js';
 
 const draftKey = (t, id) => `utc.draft.${t}.${id}`;
 const loadDraft = (k) => { try { return JSON.parse(localStorage.getItem(k)) || null; } catch { return null; } };
@@ -106,14 +107,15 @@ export async function essayPractice(ctx, id, opts = {}) {
   const drawSel = () => {
     if (!ready.length) { selBox.replaceChildren(h('a', { class: 'btn small', href: '#/settings/ai' }, 'Thêm API key AI →')); rndBtn.hidden = true; checkBtn.disabled = true; return; }
     const p = prov(), saved = (ai.vault.items[cur] || {}).model || '';
-    provSel = h('select', { id: 'epProv', 'aria-label': 'Nhà cung cấp AI' }, ...ready.map((x) => h('option', { value: x.id, selected: x.id === cur }, x.label)));
+    provSel = h('select', { id: 'epProv', 'aria-label': 'AI', ...pickerAttrs('ai') }, ...ready.map((x) => h('option', { value: x.id, selected: x.id === cur }, aiTitle(x, ai.vault.items[x.id]))));
     provSel.addEventListener('change', () => { cur = provSel.value; connected = false; lockUi(); drawSel(); setPill('', 'Chưa kiểm tra', 'Đổi nhà cung cấp — hãy kiểm tra lại kết nối.'); });
     if (p.allowCustomModel) modelEl = h('input', { id: 'epModel', list: 'ep-models', value: saved, placeholder: `Model (mặc định: ${p.defaultModel})`, maxlength: 100, autocomplete: 'off', 'aria-label': 'Model' });
-    else modelEl = h('select', { id: 'epModel', 'aria-label': 'Model' }, h('option', { value: '', selected: !saved }, `Mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === saved }, m)));
+    else modelEl = h('select', { id: 'epModel', 'aria-label': 'Model', ...pickerAttrs('model') }, h('option', { value: '', selected: !saved }, `Mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === saved }, m)));
     modelEl.addEventListener('change', () => { if (connected) { connected = false; lockUi(); setPill('', 'Chưa kiểm tra', 'Đổi model — hãy kiểm tra lại kết nối.'); } });
-    selBox.replaceChildren(h('div', null, h('label', { for: 'epProv' }, '🔑 Nhà cung cấp: '), provSel), h('div', null, h('label', { for: 'epModel' }, '🤖 Model: '), modelEl),
+    selBox.replaceChildren(h('div', null, h('label', { for: 'epProv' }, '🔑 AI: '), provSel), h('div', null, h('label', { for: 'epModel' }, '🤖 Model: '), modelEl),
       p.allowCustomModel ? h('datalist', { id: 'ep-models' }, ...p.models.map((m) => h('option', { value: m }))) : null, rndBtn);
     rndBtn.hidden = !(p.models && p.models.length);
+    enhancePickers(selBox);          // ô chọn AI / model có tìm kiếm (chép từ subjectPicker.js của luyen-thi)
   };
   rndBtn.addEventListener('click', () => { const p = prov(); if (!p || !p.models.length) return; modelEl.value = p.models[Math.floor(Math.random() * p.models.length)]; modelEl.dispatchEvent(new Event('change')); });
 
@@ -156,7 +158,7 @@ export async function essayPractice(ctx, id, opts = {}) {
     checkBtn.disabled = true; setPill('checking', 'Đang kiểm tra…', 'Đang thử kết nối bằng key của bạn…');
     try {
       const r = (await post('/api/ai/test', { provider: cur, model: modelVal() }, { timeout: 60000 })).result;
-      connected = true; setPill('ok', 'Đã kết nối', `${r.label} · model ${r.model} · ${r.ms}ms${r.fallbackFrom ? ` (model ${r.fallbackFrom} quá tải, tự chuyển)` : ''}`);
+      connected = true; setPill('ok', 'Đã kết nối', `${r.name ? r.name + ' — ' : ''}${r.label} · model ${r.model} · ${r.ms}ms${r.fallbackFrom ? ` (model ${r.fallbackFrom} quá tải, tự chuyển)` : ''}`);
       if (!up) { unlockUi(); startTimer(); ta.focus(); }
     } catch (e) { connected = false; setPill('err', 'Lỗi kết nối', e.message || 'Không kết nối được AI'); lockUi(); }
     finally { checkBtn.disabled = false; }
