@@ -78,7 +78,7 @@ Thanh trên cùng hiện **email đăng nhập** (tài khoản cũ chưa có ema
 - Lỗi key sai/hết hạn mức trả về mã 400/429 (không bao giờ 401 để khỏi bị đăng xuất nhầm). Giới hạn: 15 lần chấm/phân tích AI và 20 lần thử kết nối mỗi giờ. Kết quả phân tích lưu trong bài nộp (`aiAnalyses`).
 
 ## Chia sẻ bài (trắc nghiệm + tự luận) + lịch sử của nhóm
-- Trang chủ → thẻ bài (trắc nghiệm hoặc tự luận) → **🔗 Chia sẻ** → sao chép link dạng `https://TEN_GITHUB.github.io/TEN_REPO/frontend/#/s/<shareId>` (kiểu `/lessons/<id>/share` của bản cũ). Có nút **Tắt chia sẻ**; bật lại vẫn dùng đúng link cũ.
+- Trang chủ → thẻ bài (trắc nghiệm hoặc tự luận) → **🔗 Chia sẻ** → sao chép link dạng `https://TEN_GITHUB.github.io/TEN_REPO/#/lessons/<id bài>/share?id=<id người tạo>` (giống `/lessons/<id>/share` của bản cũ; cũng chạy `/history` và `/play`). Link cũ dạng `#/s/<shareId>` vẫn mở được. Có nút **Tắt chia sẻ**; bật lại vẫn dùng đúng link cũ.
 - Người nhận mở link: **chưa đăng nhập thì bị chuyển sang đăng nhập/đăng ký, xong quay lại đúng bài**. Bài làm lưu trong **kho riêng của người làm** (`u/<uid>/submissions`); đề được gửi xuống **không kèm đáp án/giải thích**, máy chủ chấm khi nộp; ảnh trong đề tải qua `/api/shares/:id/images/:imgId` (chỉ ảnh nằm trong đề).
 - Trang `#/s/<id>/history` (chuyển từ `/lessons/:id/history` của luyen-thi): thống kê, **biểu đồ điểm theo thời gian** (1 ngày/1 tháng/1 năm/tất cả, theo năm-tháng-ngày, 10 khoảng điểm [0,1]…[9,10], nối điểm) và bảng.
   - **Chủ bài**: thấy tên từng người, điểm, giờ nộp; *không* đọc được bài làm.

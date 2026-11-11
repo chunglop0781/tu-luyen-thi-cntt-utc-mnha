@@ -134,6 +134,7 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
 
   // ── Chia sẻ bài trắc nghiệm / tự luận (người làm phải đăng nhập; chủ bài thấy tên, người làm chỉ thấy bài + điểm của mình) ──
   router.post('/api/shares', async (ctx) => ({ ok: true, ...(await content.createShare(authed(ctx).sub, ctx.body.type || 'quiz', ctx.body.itemId)) }));
+  router.get('/api/share-link/:owner/:item', async (ctx) => ({ ok: true, ...(await content.resolveShare(authed(ctx).sub, ctx.params.owner, ctx.params.item)) }));
   router.patch('/api/shares/:sid', async (ctx) => ({ ok: true, ...(await content.setShareEnabled(authed(ctx).sub, ctx.params.sid, ctx.body.enabled !== false)) }));
   router.get('/api/shares/:sid', async (ctx) => ({ ok: true, ...(await content.getShared(authed(ctx).sub, ctx.params.sid)) }));
   router.get('/api/shares/:sid/history', async (ctx) => ({ ok: true, ...(await content.sharedHistory(authed(ctx).sub, ctx.params.sid)) }));

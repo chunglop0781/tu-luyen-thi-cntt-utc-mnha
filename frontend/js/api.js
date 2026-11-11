@@ -139,7 +139,7 @@ export function imageUrl(id) {
 // ── nhớ trang đích khi chưa đăng nhập (mở link chia sẻ → đăng nhập → quay lại đúng bài) ──
 export const nextPage = {
   save(path) { try { sessionStorage.setItem('utc.next', path); } catch { /* bỏ qua */ } },
-  take() { try { const v = sessionStorage.getItem('utc.next'); sessionStorage.removeItem('utc.next'); return v && /^\/s\/[a-f0-9]+(\/(play|history))?$/.test(v) ? v : null; } catch { return null; } },
+  take() { try { const v = sessionStorage.getItem('utc.next'); sessionStorage.removeItem('utc.next'); return v && /^\/(s\/[a-f0-9]+(\/(play|history))?|lessons\/[a-f0-9]+\/(share|history|play)\?id=[a-f0-9]+)$/.test(v) ? v : null; } catch { return null; } },
 };
 
 /** Nén ảnh phía trình duyệt (≤ ~1600px, JPEG) để vừa giới hạn 4,5MB của Vercel, rồi tải lên. */

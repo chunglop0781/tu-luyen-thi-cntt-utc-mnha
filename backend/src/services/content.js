@@ -308,6 +308,16 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { shareId: sid, enabled: true };
   }
 
+  /** Link kiểu /lessons/<itemId>/share?id=<ownerId>: tra ngược (chủ bài, bài) → shareId. Vẫn phải đăng nhập; tắt chia sẻ thì người khác không vào được. */
+  async function resolveShare(uid, ownerId, itemId) {
+    mustId(ownerId); mustId(itemId);
+    const ref = await store.read('data', shareRefPath(ownerId, itemId));
+    const sid = ref && ref.data && ref.data.shareId;
+    if (!sid || !isId(sid)) throw new HttpError(404, 'Link chia sẻ không tồn tại', 'NOT_FOUND');
+    await loadShare(sid, uid);     // 404 nếu chủ bài đã tắt chia sẻ (chủ bài thì luôn vào được)
+    return { shareId: sid };
+  }
+
   async function setShareEnabled(uid, sid, enabled) {
     await loadShare(sid, uid, { ownerOnly: true, needEnabled: false });
     await store.update('data', sharePath(sid), (d) => { d.enabled = !!enabled; return d; }, { message: `share ${sid}` });
@@ -542,7 +552,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { exportedAt: nowIso(), items: items.filter(Boolean), submissions: subs.filter(Boolean) };
   }
 
-  return { overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
+  return { overview, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, resolveShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
 }
 
 module.exports = { createContent };

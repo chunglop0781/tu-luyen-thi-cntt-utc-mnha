@@ -399,6 +399,13 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.ok(!/"correct"|"answers"|explanationHtml|Web dùng/.test(txt), txt.slice(0, 300));
     assert.equal((await call('GET', `/api/shares/${rid()}${rid().slice(0, 4)}`, { token: B.accessToken })).status, 404);
   });
+  await t('link kiểu /lessons/<id>/share?id=<chủ bài> tra ra đúng shareId; phải đăng nhập; id sai → 404', async () => {
+    assert.equal((await call('GET', `/api/share-link/${A.user.id}/${quizId}`)).status, 401);
+    const r = await call('GET', `/api/share-link/${A.user.id}/${quizId}`, { token: B.accessToken }); assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.shareId, shareId);
+    assert.equal((await call('GET', `/api/share-link/${B.user.id}/${quizId}`, { token: B.accessToken })).status, 404);   // sai chủ bài
+    assert.equal((await call('GET', `/api/share-link/${A.user.id}/zz`, { token: B.accessToken })).status, 400);
+  });
   let bSub, cSub;
   await t('người khác nộp → chấm đúng, bài nằm trong kho CỦA HỌ (không phải của chủ), idempotent', async () => {
     const answers = { 'mcq-1': ['B'], 'mcq-2': ['A', 'C'] };

@@ -1,4 +1,4 @@
-import { get, post, patch, imageCtx } from '../api.js';
+import { get, post, patch, imageCtx, session } from '../api.js';
 import { h, toast, action, fmtDate, pctClass } from '../ui.js';
 import { scoreChart } from '../scoreChart.js';
 import { quizPracticePage } from './quiz.js';
@@ -6,6 +6,8 @@ import { essayPractice } from './practice.js';
 
 /** Link chia sẻ: dùng đúng địa chỉ trang đang mở (GitHub Pages) + #/s/<id>. */
 export const shareLink = (sid) => `${location.origin}${location.pathname}#/s/${sid}`;
+/** Link kiểu luyen-thi: #/lessons/<id bài>/share?id=<id chủ bài>. */
+export const lessonLink = (itemId, ownerId, page = 'share') => `${location.origin}${location.pathname}#/lessons/${itemId}/${page}?id=${ownerId}`;
 
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; }
@@ -15,7 +17,7 @@ async function copyText(text) {
 /** Hộp thoại sau khi bấm "Chia sẻ" trên một bài (trắc nghiệm hoặc tự luận) của mình. */
 export async function openShareDialog(item, onChange) {
   const r = await post('/api/shares', { type: item.type, itemId: item.id });
-  const sid = r.shareId, link = shareLink(sid);
+  const sid = r.shareId, owner = session.get().user.id, link = lessonLink(item.id, owner);
   const input = h('input', { readonly: true, value: link, onfocus: (e) => e.target.select() });
   const copy = h('button', { class: 'btn primary', type: 'button' }, '📋 Sao chép link');
   copy.addEventListener('click', async () => { toast((await copyText(link)) ? 'Đã sao chép link' : 'Không tự sao chép được — hãy chọn link và copy thủ công', 'ok'); });
@@ -88,4 +90,12 @@ export async function shareHistoryPage(ctx, sid) {
     h('div', { class: 'stats' }, stat(d.stats.total, own ? 'Tổng bài nộp' : 'Số lần đã nộp'), d.stats.pending ? stat(d.stats.pending, 'Chờ AI chấm') : null, own ? stat(d.stats.students, 'Số người đã nộp') : null, stat(d.stats.best == null ? '—' : `${d.stats.best} / 10`, 'Điểm cao nhất (thang 10)')),
     scoreChart({ isOwner: own, points: d.points, onOpen: (p) => ctx.go(`/submission/${p.id}`) }),
     table);
+}
+
+/** #/lessons/<id bài>/(share|history|play)?id=<id chủ bài> — tra ra shareId rồi mở đúng trang. */
+export async function lessonLinkPage(ctx, m) {
+  const [, itemId, page] = m, owner = ctx.query.get('id') || '';
+  if (!/^[a-f0-9]{16,32}$/.test(owner)) throw new Error('Link chia sẻ thiếu id người tạo (?id=…)');
+  const { shareId } = await get(`/api/share-link/${owner}/${itemId}`);
+  return page === 'history' ? shareHistoryPage(ctx, shareId) : page === 'play' ? sharePlayPage(ctx, shareId) : sharePage(ctx, shareId);
 }
