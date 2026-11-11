@@ -104,7 +104,13 @@ export function safeHtml(html) {
   const walk = (src, dst) => {
     for (const n of src.childNodes) {
       if (n.nodeType === 3) dst.append(n.textContent);
-      else if (n.nodeType === 1) { if (OK_TAGS.has(n.tagName)) { const e = document.createElement(n.tagName.toLowerCase()); walk(n, e); dst.append(e); } else walk(n, dst); }
+      else if (n.nodeType === 1) { if (OK_TAGS.has(n.tagName)) {
+        const e = document.createElement(n.tagName.toLowerCase());
+        const al = ((/text-align\s*:\s*(left|right|center|justify)/i.exec(n.getAttribute('style') || '') || [])[1] || n.getAttribute('align') || '').toLowerCase();
+        if (/^(left|right|center|justify)$/.test(al)) e.style.textAlign = al;                       // chỉ giữ căn lề, bỏ mọi style khác
+        if (n.tagName === 'TD' || n.tagName === 'TH') for (const k of ['colspan', 'rowspan']) { const v = parseInt(n.getAttribute(k), 10); if (v > 1 && v <= 20) e.setAttribute(k, String(v)); }
+        walk(n, e); dst.append(e);
+      } else walk(n, dst); }
     }
   };
   walk(doc.body, box);

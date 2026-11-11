@@ -1,3 +1,5 @@
+> 🤖 Người/AI sửa code: đọc [AI-NOTES.md](AI-NOTES.md) trước (không thêm vẽ tay cho tự luận; frontend copy từ bản cũ, không làm "giống").
+
 # Tự luyện thi của mnha (tu-luyen-thi-cntt-utc-mnha — bản theo từng tài khoản)
 
 👉 **Cài đặt từng bước: xem [HUONG-DAN-CAI-DAT.md](HUONG-DAN-CAI-DAT.md)**

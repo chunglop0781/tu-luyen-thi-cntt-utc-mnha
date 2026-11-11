@@ -43,14 +43,19 @@ function injectCss() {
 .ep-timer{font-weight:800;font-size:14px;min-width:70px;text-align:center;padding:6px 12px;border-radius:8px;border:1px solid #fecdd3;background:#fff1f2;color:#a61c2f;font-variant-numeric:tabular-nums}
 .ep-timer.wait{background:#f8fafc;color:#64748b;border-color:#cbd5e1}.ep-timer.warn{background:#fff7ed;color:#d97706;border-color:#fed7aa}
 .ep-timer.danger,.ep-timer.fin{background:#fef2f2;color:#dc2626;border-color:#fecaca}.ep-timer.fin{animation:ep-pulse 1s infinite}
-.ep-lock{display:none;margin-bottom:12px;padding:10px 14px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:14px}.ep-lock.show{display:block}
+.ep-lock{display:none;margin-bottom:12px;padding:10px 13px;border-radius:7px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:13px;font-weight:700}.ep-lock.show{display:block}
+.ep-tabs{display:flex;gap:8px;margin-bottom:14px;border-bottom:2px solid #eee}.ep-tab{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;margin-bottom:-2px;border-bottom:3px solid var(--pri);font-size:14px;font-weight:800;color:var(--pri)}
+.ep-info{display:flex;justify-content:space-between;gap:15px;color:var(--muted);font-size:13px}.ep-wc{font-weight:700;color:#d97706}.ep-wc.good{color:#16834b}
+.ep-actions{display:flex;flex-direction:column;gap:10px;margin-top:6px}.ep-actions .row{gap:10px}.ep-clear{background:#f3f4f6;border:1px solid #e3e3e3;padding:8px 14px;border-radius:7px;font-weight:700;font-size:13px;cursor:pointer;color:#334155}.ep-clear:hover{background:#e5e7eb}.ep-clear:disabled{opacity:.5;cursor:not-allowed}
+.ep-submit{min-height:48px;font-size:15px;font-weight:800;border-radius:7px}
 .ep-write{width:100%;min-height:440px;resize:vertical;border:1px solid #d7d7d7;border-radius:8px;padding:18px;font:inherit;font-size:16px;line-height:1.8;background:repeating-linear-gradient(to bottom,var(--card) 0,var(--card) 31px,#eeeeee 32px)}
 .ep-write:disabled{opacity:.55;cursor:not-allowed}
 @keyframes ep-pulse{0%,100%{opacity:1}50%{opacity:.35}}`;
   document.head.append(s);
 }
 
-/** Làm bài tự luận — giống trang làm bài của luyen-thi-cntt-utc-mnha: hiện prompt chấm đang dùng, âm báo hết giờ, thanh AI (chọn nhà cung cấp/model, kiểm tra kết nối),
+/** ⚠️ KHÔNG thêm tab "Vẽ tay (JS Paint)", tải ảnh viết tay (photoToPaint) hay tải PDF → ảnh vào trang này — chủ dự án đã chủ động bỏ (xem AI-NOTES.md). Bài tự luận CHỈ nhập chữ.
+ *  Làm bài tự luận — giống trang làm bài của luyen-thi-cntt-utc-mnha: hiện prompt chấm đang dùng, âm báo hết giờ, thanh AI (chọn nhà cung cấp/model, kiểm tra kết nối),
  *  bố cục 2 cột, khoá làm bài tới khi AI kết nối, nộp xong tự chấm AI. Bản nháp tự lưu trong trình duyệt; id bài nộp cố định nên gửi lại khi rớt mạng không bị trùng.
  *  opts.shareId + opts.item: làm bài được chia sẻ (id = shareId) — nộp qua /api/shares/:id/submissions. (Phần vẽ tay / tải ảnh-PDF của bản cũ không có ở bản này.) */
 export async function essayPractice(ctx, id, opts = {}) {
@@ -115,12 +120,17 @@ export async function essayPractice(ctx, id, opts = {}) {
   // ── Bài viết + đồng hồ ──
   const ta = h('textarea', { class: 'ep-write', placeholder: 'Viết bài làm của bạn ở đây…', disabled: true }); ta.value = d.text;
   const timer = h('div', { class: 'ep-timer wait' }, limit ? mmss(limit) : '');
-  const lock = h('div', { class: 'ep-lock show' }, '🔒 Hãy kết nối AI thành công để bắt đầu làm bài.');
-  const submit = h('button', { class: 'btn primary', disabled: true }, 'Nộp bài');
+  const lock = h('div', { class: 'ep-lock show' }, limit ? '🔒 Hãy kết nối AI thành công để bắt đầu tính giờ.' : '🔒 Hãy kết nối AI thành công để bắt đầu làm bài.');
+  const SUBMIT_LABEL = '🚀 Nộp bài & chấm AI';
+  const submit = h('button', { class: 'btn primary ep-submit', disabled: true }, SUBMIT_LABEL);
+  const wc = h('span', { class: 'ep-wc' }, '0 từ');
+  const countWords = () => { const n = (ta.value.trim().match(/\S+/g) || []).length; wc.textContent = `${n} từ`; wc.className = `ep-wc${n >= 50 ? ' good' : ''}`; };
+  const clearBtn = h('button', { class: 'ep-clear', type: 'button', disabled: true }, '🗑 Xoá bài');
+  clearBtn.addEventListener('click', () => { if (!ta.value || !confirm('Xoá toàn bộ bài đã viết?')) return; ta.value = ''; d.text = ''; saveDraft(key, d); countWords(); ta.focus(); });
   let tick = null, up = false, busy = false;
   ctx.setCleanup(() => { clearInterval(tick); stopAudio(); });
-  const lockUi = () => { ta.disabled = true; submit.disabled = true; lock.classList.add('show'); };
-  const unlockUi = () => { ta.disabled = false; submit.disabled = false; lock.classList.remove('show'); };
+  const lockUi = () => { ta.disabled = true; submit.disabled = true; clearBtn.disabled = true; lock.classList.add('show'); };
+  const unlockUi = () => { ta.disabled = false; submit.disabled = false; clearBtn.disabled = false; lock.classList.remove('show'); };
   function startTimer() {
     if (tick) return;
     const now = Date.now();
@@ -138,7 +148,8 @@ export async function essayPractice(ctx, id, opts = {}) {
     };
     upd(); tick = setInterval(upd, 1000);
   }
-  ta.addEventListener('input', () => { d.text = ta.value; saveDraft(key, d); });
+  ta.addEventListener('input', () => { d.text = ta.value; saveDraft(key, d); countWords(); });
+  countWords();
 
   checkBtn.addEventListener('click', async () => {
     if (!cur || checkBtn.disabled) return;
@@ -163,7 +174,7 @@ export async function essayPractice(ctx, id, opts = {}) {
       try { await post(`/api/submissions/${r.submission.id}/ai-grade`, { provider: cur, model: modelVal() }, { timeout: 70000 }); toast('AI đã chấm xong', 'ok'); }
       catch (e) { toast(`Đã nộp nhưng chưa chấm được: ${e.message}. Bạn chấm lại ở trang kết quả.`, 'warn', 7000); }
       ctx.go(`/submission/${r.submission.id}`);
-    } catch (e) { toast(e.message, 'err'); busy = false; if (!up && connected) { submit.disabled = false; startTimer(); } submit.textContent = 'Nộp bài'; }
+    } catch (e) { toast(e.message, 'err'); busy = false; if (!up && connected) { submit.disabled = false; startTimer(); } submit.textContent = SUBMIT_LABEL; }
   });
 
   const histHref = historyTarget({ type: 'essay', id, shareId: shared, ownShareId: item.shareId });
@@ -180,7 +191,7 @@ export async function essayPractice(ctx, id, opts = {}) {
       h('div', { class: 'ep-panel' }, h('div', { class: 'ep-ph' }, h('h3', null, 'Đề bài'), h('span', null, limit ? `${item.duration} phút` : 'Không đếm giờ')),
         h('div', { class: 'ep-pb' }, item.prompt ? richOrHtml(item.prompt) : h('p', { class: 'muted' }, '(Chưa có nội dung đề bài)'))),
       h('div', { class: 'ep-panel' }, h('div', { class: 'ep-ph' }, h('h3', null, '✍️ Bài viết của bạn'), limit ? timer : h('span', null, '∞ Không giới hạn thời gian')),
-        h('div', { class: 'ep-pb stack' }, lock, ta, h('small', { class: 'muted' }, '💾 Bản nháp tự lưu trên máy bạn.'),
+        h('div', { class: 'ep-pb stack' }, lock, h('div', { class: 'ep-tabs' }, h('span', { class: 'ep-tab' }, '⌨️ Nhập chữ')), ta, h('div', { class: 'ep-info' }, wc, h('span', null, 'Mục tiêu: xem đề bài')), h('small', { class: 'muted' }, '💾 Bản nháp tự lưu trên máy bạn.'),
           shared ? h('small', { class: 'muted' }, '🤖 Nộp xong AI tự chấm bằng API key của bạn — bài chia sẻ chỉ chấm một lần, không xoá được.') : null,
-          h('div', { class: 'row' }, submit, h('a', { class: 'btn ghost', href: '#/' }, 'Thoát'))))));
+          h('div', { class: 'ep-actions' }, h('div', { class: 'row' }, clearBtn, h('a', { class: 'btn ghost', href: '#/' }, 'Thoát')), submit)))));
 }
