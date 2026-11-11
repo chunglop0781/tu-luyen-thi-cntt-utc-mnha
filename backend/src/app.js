@@ -10,6 +10,8 @@ const { createContent } = require('./services/content');
 const { createWebhook } = require('./services/webhook');
 const { pruneRepo } = require('./services/prune');
 const { previewQuiz } = require('./services/validate');
+const fcfg = require('./services/flashcardConfig');
+const { parse: parseFlashcards } = require('./services/flashcardParser');
 const { safeEqual } = require('./crypto');
 const qcfg = require('./services/quiz/config');
 const { ALLOWED_AUDIO_HOSTS } = require('./services/quiz/audio');
@@ -116,7 +118,30 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   router.get('/api/overview', async (ctx) => ({ ok: true, ...(await content.overview(authed(ctx).sub)) }));
   router.post('/api/reindex', async (ctx) => { await content.reindex(authed(ctx).sub); return { ok: true, ...(await content.overview(authed(ctx).sub)) }; });
   router.get('/api/export', async (ctx) => ({ ok: true, ...(await content.exportAll(authed(ctx).sub)) }));
-  router.get('/api/quizzes/config', async (ctx) => { authed(ctx); return { ok: true, config: quizPublicConfig() }; });   // prompt mẫu + giới hạn đề 3 phần
+  router.get('/api/quizzes/config', async (ctx) => { authed(ctx); return { ok: true, config: quizPublicConfig() }; });
+  router.get('/api/flashcards/config', async (ctx) => {
+    authed(ctx);
+    return { ok: true, config: {
+      languages: fcfg.LANGUAGES, defaultLanguage: fcfg.DEFAULT_LANGUAGE,
+      modes: [{ id: 'language', label: fcfg.MODE_LABEL.language, hint: fcfg.MODE_HINT.language }, { id: 'theory', label: fcfg.MODE_LABEL.theory, hint: fcfg.MODE_HINT.theory }],
+      prompts: { language: fcfg.PROMPT_LANGUAGE, theory: fcfg.PROMPT_THEORY },
+      limits: fcfg.LIMITS
+    } };
+  });
+  router.post('/api/flashcards/parse', async (ctx) => {
+    authed(ctx);
+    const mode = ctx.body && ctx.body.mode === 'theory' ? 'theory' : 'language';
+    const preview = parseFlashcards(String((ctx.body && ctx.body.content) || ''), mode);
+    return { ok: true, preview: { total: preview.cards.length, cards: preview.cards, errors: preview.errors, imageHints: preview.imageHints } };
+  });
+  router.get('/api/flashcards/:id', async (ctx) => {
+    const uid = authed(ctx).sub; const item = await content.getItem(uid, 'flashcard', ctx.params.id);
+    const shareId = await content.shareIdOf(uid, ctx.params.id).catch(() => null);
+    return { ok: true, item: shareId ? { ...item, shareId } : item };
+  });
+  router.put('/api/flashcards/:id', async (ctx) => ({ ok: true, item: await content.putItem(authed(ctx).sub, 'flashcard', ctx.params.id, ctx.body) }));
+  router.delete('/api/flashcards/:id', async (ctx) => { await content.deleteItem(authed(ctx).sub, 'flashcard', ctx.params.id); return { ok: true }; });
+   // prompt mẫu + giới hạn đề 3 phần
   router.post('/api/quizzes/parse', async (ctx) => { authed(ctx); return { ok: true, preview: previewQuiz(ctx.body) }; });   // xem trước / bắt lỗi đề 3 phần
   for (const [type, seg] of [['essay', 'essays'], ['quiz', 'quizzes']]) {
     router.get(`/api/${seg}/:id`, async (ctx) => { const uid = authed(ctx).sub; const item = await content.getItem(uid, type, ctx.params.id); const shareId = await content.shareIdOf(uid, ctx.params.id).catch(() => null); return { ok: true, item: shareId ? { ...item, shareId } : item }; });

@@ -593,7 +593,7 @@ export function mountQuizEditor(CFG, bridge) {
         return { card: card, part: part, i: i, q: state[part][i] };
     }
 
-    document.addEventListener("input", function (e) {
+    _on(document, "input", function (e) {
         var c = ctx(e.target);
         if (c) {
             var f = e.target.getAttribute("data-f");
@@ -655,7 +655,7 @@ export function mountQuizEditor(CFG, bridge) {
         }
     });
 
-    document.addEventListener("click", function (e) {
+    _on(document, "click", function (e) {
         var addBtn = e.target.closest("[data-add]");
         if (addBtn) { var k = addBtn.getAttribute("data-add"); state[k].push(blank(k)); renderPart(k); return; }
 

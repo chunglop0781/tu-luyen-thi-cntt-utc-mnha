@@ -519,6 +519,74 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.equal((await call('GET', `/api/shares/${eShare}/history`, { token: C.accessToken })).json.points.filter((x) => x.m).length, 1);
   });
 
+  console.log('Flashcard (ứng dụng) + chia sẻ như trắc nghiệm / tự luận');
+  const FC_RAW = '+) admire\n++) ədˈmaɪə\n=> ngưỡng mộ\n\n+) elephant\n=> con voi\n\n+) tolerate\n=> chịu đựng';
+  let fcId, fcShare, fcBSub;
+  await t('tạo flashcard (PUT idempotent) → file ở repo DATA; nội dung sai báo lỗi; Học lý thuyết không nhận ++)', async () => {
+    fcId = rid();
+    const r = await call('PUT', `/api/flashcards/${fcId}`, { token: A.accessToken, body: { title: 'Unit 1', subject: 'Tiếng Anh', mode: 'language', language: 'en-US', content: FC_RAW } });
+    assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.item.cards.length, 3); assert.equal(r.json.item.cards[0].ipa, 'ədˈmaɪə');
+    assert.ok(gh.file('tu-luyen-thi-cntt-utc-mnha-data', `u/${A.user.id}/flashcards/${fcId}.json`));
+    assert.equal((await call('PUT', `/api/flashcards/${fcId}`, { token: A.accessToken, body: { title: 'Unit 1', subject: 'Tiếng Anh', mode: 'language', language: 'en-US', content: FC_RAW } })).status, 200);
+    assert.equal((await call('PUT', `/api/flashcards/${rid()}`, { token: A.accessToken, body: { title: 'x', mode: 'language', language: 'en-US', content: '+) chỉ có mặt trước' } })).status, 400);
+    assert.equal((await call('PUT', `/api/flashcards/${rid()}`, { token: A.accessToken, body: { title: 'x', mode: 'theory', content: '+) q\n++) ipa\n=> a' } })).status, 400);
+    assert.equal((await call('PUT', `/api/flashcards/${rid()}`, { token: A.accessToken, body: { title: '', mode: 'theory', content: '+) q\n=> a' } })).status, 400);
+    const p = await call('POST', '/api/flashcards/parse', { token: A.accessToken, body: { mode: 'language', content: FC_RAW } }); assert.equal(p.status, 200); assert.equal(p.json.preview.total, 3);
+  });
+  await t('flashcard là của riêng từng tài khoản; overview tách riêng flashcards; chưa đăng nhập 401', async () => {
+    assert.equal((await call('GET', `/api/flashcards/${fcId}`)).status, 401);
+    assert.equal((await call('GET', `/api/flashcards/${fcId}`, { token: B.accessToken })).status, 404);
+    assert.equal((await call('DELETE', `/api/flashcards/${fcId}`, { token: B.accessToken })).status, 404);
+    const ov = (await call('GET', '/api/overview', { token: A.accessToken })).json;
+    assert.equal(ov.flashcards.length, 1); assert.equal(ov.flashcards[0].size, 3); assert.equal(ov.stats.flashcards, 1);
+    assert.equal((await call('GET', '/api/overview', { token: B.accessToken })).json.flashcards.length, 0);
+  });
+  await t('tự học: nộp kết quả Kiểm tra (đúng/tổng → thang 10), kẹp giá trị, lưu vào kho của mình', async () => {
+    const id = rid(); const r = await call('PUT', `/api/submissions/${id}`, { token: A.accessToken, body: { itemType: 'flashcard', itemId: fcId, ok: 2, total: 3, durationSec: 20 } });
+    assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.submission.score, 6.7); assert.equal(r.json.submission.max, 10);
+    const id2 = rid(); const r2 = await call('PUT', `/api/submissions/${id2}`, { token: A.accessToken, body: { itemType: 'flashcard', itemId: fcId, ok: 99, total: 3 } });
+    assert.equal(r2.json.submission.correctCount, 3); assert.equal(r2.json.submission.score, 10);
+    const ov = (await call('GET', '/api/overview', { token: A.accessToken })).json; assert.equal(ov.flashcards[0].attempts, 2); assert.equal(ov.flashcards[0].bestPct, 100);
+  });
+  await t('chia sẻ flashcard: chỉ chủ bài tạo link; người làm nhận bộ thẻ, mở được bằng /lessons/<id>/share', async () => {
+    assert.equal((await call('POST', '/api/shares', { token: B.accessToken, body: { type: 'flashcard', itemId: fcId } })).status, 404);
+    const r = await call('POST', '/api/shares', { token: A.accessToken, body: { type: 'flashcard', itemId: fcId } }); assert.equal(r.status, 200, JSON.stringify(r.json)); fcShare = r.json.shareId;
+    assert.equal((await call('POST', '/api/shares', { token: A.accessToken, body: { type: 'flashcard', itemId: fcId } })).json.shareId, fcShare);
+    assert.equal((await call('GET', `/api/shares/${fcShare}`)).status, 401);
+    const g = await call('GET', `/api/shares/${fcShare}`, { token: B.accessToken }); assert.equal(g.status, 200);
+    assert.equal(g.json.share.type, 'flashcard'); assert.equal(g.json.item.cards.length, 3); assert.equal(g.json.item.mode, 'language'); assert.ok(!g.json.share.isOwner);
+    assert.equal((await call('GET', `/api/share-link/${A.user.id}/${fcId}`, { token: B.accessToken })).json.shareId, fcShare);
+  });
+  await t('người khác nộp Kiểm tra qua link → bài nằm kho của HỌ, idempotent, hiện ở "Được chia sẻ với tôi"', async () => {
+    fcBSub = rid(); const body = { ok: 1, total: 3, durationSec: 15 };
+    const r = await call('PUT', `/api/shares/${fcShare}/submissions/${fcBSub}`, { token: B.accessToken, body }); assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.submission.type, 'flashcard'); assert.equal(r.json.submission.score, 3.3); assert.equal(r.json.submission.shareId, fcShare);
+    assert.ok(gh.file('tu-luyen-thi-cntt-utc-mnha-data', `u/${B.user.id}/submissions/${fcBSub}.json`));
+    assert.ok(!gh.file('tu-luyen-thi-cntt-utc-mnha-data', `u/${A.user.id}/submissions/${fcBSub}.json`));
+    assert.equal((await call('PUT', `/api/shares/${fcShare}/submissions/${fcBSub}`, { token: B.accessToken, body })).status, 200);
+    assert.equal((await call('GET', `/api/submissions/${fcBSub}`, { token: A.accessToken })).status, 404);     // chủ bộ thẻ không đọc được bài của người khác
+    const ov = (await call('GET', '/api/overview', { token: B.accessToken })).json;
+    assert.equal(ov.flashcardShared.length, 1); assert.equal(ov.flashcardShared[0].shareId, fcShare); assert.equal(ov.flashcards.length, 0);
+  });
+  await t('lịch sử flashcard: chủ thấy tên từng người; người làm chỉ thấy bài mình, điểm người khác ẩn danh', async () => {
+    const own = (await call('GET', `/api/shares/${fcShare}/history`, { token: A.accessToken })).json;
+    assert.equal(own.share.type, 'flashcard'); assert.equal(own.share.isOwner, true); assert.ok(own.points.some((p) => p.n === B.user.username || p.n === (B.user.displayName || '')) || own.points.some((p) => p.n));
+    const mine = (await call('GET', `/api/shares/${fcShare}/history`, { token: B.accessToken })).json;
+    assert.equal(mine.share.isOwner, false); assert.equal(mine.stats.total, 1); assert.ok(mine.points.every((p) => p.n === undefined));
+    const c = (await call('GET', `/api/shares/${fcShare}/history`, { token: C.accessToken })).json; assert.equal(c.stats.total, 0);
+  });
+  await t('tắt chia sẻ → người làm bị chặn, bật lại cùng link; xoá bộ thẻ → xoá file + chỉ mục', async () => {
+    assert.equal((await call('PATCH', `/api/shares/${fcShare}`, { token: A.accessToken, body: { enabled: false } })).status, 200);
+    assert.equal((await call('GET', `/api/shares/${fcShare}`, { token: B.accessToken })).status, 404);
+    assert.equal((await call('PUT', `/api/shares/${fcShare}/submissions/${rid()}`, { token: B.accessToken, body: { ok: 1, total: 3 } })).status, 404);
+    assert.equal((await call('POST', '/api/shares', { token: A.accessToken, body: { type: 'flashcard', itemId: fcId } })).json.shareId, fcShare);
+    assert.equal((await call('GET', `/api/shares/${fcShare}`, { token: B.accessToken })).status, 200);
+    assert.equal((await call('DELETE', `/api/flashcards/${fcId}`, { token: A.accessToken })).status, 200);
+    assert.ok(!gh.file('tu-luyen-thi-cntt-utc-mnha-data', `u/${A.user.id}/flashcards/${fcId}.json`));
+    assert.equal((await call('GET', '/api/overview', { token: A.accessToken })).json.flashcards.length, 0);
+    assert.equal((await call('GET', `/api/shares/${fcShare}`, { token: B.accessToken })).status, 404);          // chủ đã xoá bộ thẻ
+  });
+
   console.log('Prompt chấm / phân tích AI riêng của từng tài khoản');
   let P, qP, qShare;     // chủ bài riêng cho phần này (hạn mức chấm AI theo tài khoản của các phần trước đã dùng hết)
   await t('chuẩn bị: tài khoản chủ bài có key AI, 1 đề trắc nghiệm đã chia sẻ', async () => {

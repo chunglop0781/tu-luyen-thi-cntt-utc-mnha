@@ -2,7 +2,7 @@
 /** Bài tự luận / trắc nghiệm / bài nộp của TỪNG tài khoản — repo DATA (private, không dọn commit). */
 const { HttpError } = require('../http');
 const { nowIso, isId, mapLimit, randomId } = require('../util');
-const { sanitizeEssay, sanitizeQuiz, rawTexts, imageRefs } = require('./validate');
+const { sanitizeEssay, sanitizeFlashcard, sanitizeQuiz, rawTexts, imageRefs } = require('./validate');
 const { suggestEssay } = require('./grading');
 const { grade: gradeParts } = require('./quiz/grade');
 const qcfg = require('./quiz/config');
@@ -13,7 +13,7 @@ const { createPrompts } = require('./prompts');
 const { PRESETS, MAX_PROVIDERS, geminiProvider, normalizeProviderInput, sanitizeDocument, findProvider, safeModel, publicProvider, publicPresets } = require('../aiModels');
 const { encryptText, decryptText, deriveKey } = require('../crypto');
 
-const TYPES = { essay: 'essays', quiz: 'quizzes' };
+const TYPES = { essay: 'essays', quiz: 'quizzes', flashcard: 'flashcards' };
 const MAX_SUBS_IN_INDEX = 1000;
 const MAX_SHARE_RESULTS = 4000;   // số kết quả tối đa lưu trong 1 bài chia sẻ
 const MAX_ANALYSES = 5;            // số lần phân tích AI tối đa cho mỗi bài nộp trắc nghiệm
@@ -35,7 +35,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   const summary = (it, prev = {}) => ({
     id: it.id, type: it.type, title: it.title, subject: it.subject, tags: it.tags,
     createdAt: it.createdAt, updatedAt: it.updatedAt,
-    size: it.type === 'quiz' ? qcfg.PARTS.reduce((n, k) => n + ((it.parts && it.parts[k] && it.parts[k].questions.length) || 0), 0) : it.maxScore,
+    size: it.type === 'quiz' ? qcfg.PARTS.reduce((n, k) => n + ((it.parts && it.parts[k] && it.parts[k].questions.length) || 0), 0) : it.type === 'flashcard' ? ((it.cards && it.cards.length) || 0) : it.maxScore,
     attempts: prev.attempts || 0, bestPct: prev.bestPct == null ? null : prev.bestPct, lastAt: prev.lastAt || null,
     ...(prev.shareId ? { shareId: prev.shareId } : {}),
   });
@@ -59,7 +59,11 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
       if (String(x.at) > String(j.lastAt)) j.lastAt = x.at;
       joined.set(x.shareId, j);
     }
-    return { items, subjects, shared: [...joined.values()].sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt))), recent: idx.subs.slice(0, 8), stats: { essays: items.filter((i) => i.type === 'essay').length, quizzes: items.filter((i) => i.type === 'quiz').length, submissions: idx.subs.length, avgQuizPct: avg } };
+    const flashcards = items.filter((i) => i.type === 'flashcard');
+    const flashcardShared = [...joined.values()].filter((j) => j.type === 'flashcard');
+    return { items, subjects, shared: [...joined.values()].sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt))),
+      flashcards, flashcardShared, recent: idx.subs.slice(0, 8),
+      stats: { essays: items.filter((i) => i.type === 'essay').length, quizzes: items.filter((i) => i.type === 'quiz').length, flashcards: flashcards.length, submissions: idx.subs.length, avgQuizPct: avg } };
   }
 
   /** shareId của một bài của mình (nếu đã chia sẻ) — để nút "Lịch sử làm bài" trỏ tới trang lịch sử của TẤT CẢ người làm. */
@@ -74,12 +78,12 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     mustType(type); mustId(id);
     const r = await store.read('data', itemPath(uid, type, id));
     if (!r) throw new HttpError(404, 'Không tìm thấy bài', 'NOT_FOUND');
-    return type === 'quiz' && r.data.parts ? { ...r.data, raw: rawTexts(r.data) } : r.data;   // raw = văn bản 3 khối để sửa lại
+    return type === 'quiz' && r.data.parts ? { ...r.data, raw: rawTexts(r.data) } : r.data;
   }
 
   async function putItem(uid, type, id, input) {
     mustType(type); mustId(id);
-    const clean = type === 'essay' ? sanitizeEssay(input || {}) : sanitizeQuiz(input || {});
+    const clean = type === 'essay' ? sanitizeEssay(input || {}) : type === 'flashcard' ? sanitizeFlashcard(input || {}) : sanitizeQuiz(input || {});
     clean.promptId = await prompts.assertUsable(uid, type, clean.promptId);   // chỉ gắn prompt có thật, đúng loại (null = dùng mặc định)
     const exist = await store.read('data', itemPath(uid, type, id), { fresh: true });
     const now = nowIso();
@@ -111,7 +115,13 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     const sub = { id, ownerId: uid, type, itemId, title: item.title, subject: item.subject, submittedAt: nowIso(),
       startedAt: input.startedAt || null, durationSec: Math.max(0, Math.min(86400, Number(input.durationSec) || 0)) };
     let pct, scoreLabel;
-    if (type === 'quiz') {
+    if (type === 'flashcard') {
+      const total = Math.max(1, Math.min(500, Number(input.total) || item.cards.length));
+      const ok = Math.max(0, Math.min(total, Number(input.ok) || 0));
+      const score = Math.round((ok / total) * 100) / 10;
+      Object.assign(sub, { score, max: 10, correctCount: ok, total, snapshot: { mode: item.mode, language: item.language, cards: item.cards } });
+      pct = Math.round(score * 10);
+    } else if (type === 'quiz') {
       const answers = sanitizeAnswers(item, input.answers);
       const result = gradeParts({ maxScore: item.maxScore, parts: item.parts }, answers);
       sub.answers = answers;
@@ -293,7 +303,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { doc, isOwner };
   }
 
-  const shareType = (doc) => (doc.type === 'essay' ? 'essay' : 'quiz');
+  const shareType = (doc) => (doc.type === 'essay' ? 'essay' : doc.type === 'flashcard' ? 'flashcard' : 'quiz');
   async function sharedItem(doc) {
     const r = await store.read('data', itemPath(doc.ownerId, shareType(doc), doc.itemId));
     if (!r) throw new HttpError(404, 'Bài này đã bị chủ bài xoá', 'NOT_FOUND');
@@ -304,6 +314,10 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   function studentItem(item) {
     if (item.type === 'essay') {     // tự luận: chỉ đề bài — đáp án mẫu + tiêu chí chỉ trả về trong bài nộp của chính người làm
       return { id: item.id, type: 'essay', title: item.title, subject: item.subject, prompt: item.prompt, maxScore: item.maxScore, duration: item.duration === undefined ? null : item.duration, updatedAt: item.updatedAt };
+    }
+    if (item.type === 'flashcard') {
+      return { id: item.id, type: 'flashcard', title: item.title, subject: item.subject, description: item.description || '', mode: item.mode, language: item.language, updatedAt: item.updatedAt,
+        cards: (item.cards || []).map((c) => ({ id: c.id, front: c.front, back: c.back, ipa: c.ipa || '', image: c.image || '' })) };
     }
     const out = { id: item.id, type: 'quiz', title: item.title, subject: item.subject, contentHtml: item.contentHtml || '', duration: item.duration === undefined ? 20 : item.duration, shuffle: !!item.shuffle, maxScore: item.maxScore, updatedAt: item.updatedAt, parts: {} };
     if (item.audioUrl) out.audioUrl = item.audioUrl;
@@ -319,7 +333,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   }
 
   async function createShare(uid, type, itemId) {
-    if (type !== 'quiz' && type !== 'essay') throw new HttpError(400, 'Loại bài không chia sẻ được', 'BAD_TYPE');
+    if (type !== 'quiz' && type !== 'essay' && type !== 'flashcard') throw new HttpError(400, 'Loại bài không chia sẻ được', 'BAD_TYPE');
     mustId(itemId);
     const item = await getItem(uid, type, itemId);
     const ref = await store.read('data', shareRefPath(uid, itemId), { fresh: true });
@@ -404,12 +418,18 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
       startedAt: input.startedAt || null, durationSec: Math.max(0, Math.min(86400, Number(input.durationSec) || 0)) };
     let sub, pct;
     if (shareType(doc) === 'essay') {
-      // Tự luận: KHÔNG chấm lúc nộp. Người làm tự bấm "Chấm bằng AI" → dùng nhà cung cấp/key trong tài khoản của họ; điểm lên biểu đồ sau đó.
+      // Tự luận: KHÔNG chấm lúc nộp. Người làm tự bấm "Chấm bằng AI".
       const text = String(input.text || '').slice(0, 30000);
       if (!text.trim()) throw new HttpError(400, 'Bài làm đang trống', 'VALIDATION');
       sub = { ...common, type: 'essay', text, score: null, max: item.maxScore, selfScore: null, ai: null, note: '',
         snapshot: { prompt: item.prompt, modelAnswer: item.modelAnswer, rubric: item.rubric, maxScore: item.maxScore } };
       pct = null;
+    } else if (shareType(doc) === 'flashcard') {
+      const total = Math.max(1, Math.min(500, Number(input.total) || item.cards.length));
+      const ok = Math.max(0, Math.min(total, Number(input.ok) || 0));
+      const score = Math.round((ok / total) * 100) / 10;
+      sub = { ...common, type: 'flashcard', ok, total, score, max: 10, correctCount: ok, snapshot: { mode: item.mode, language: item.language, cards: item.cards } };
+      pct = Math.round(score * 10);
     } else {
       const answers = sanitizeAnswers(item, input.answers);
       const result = gradeParts({ maxScore: item.maxScore, parts: item.parts }, answers);

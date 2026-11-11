@@ -8,12 +8,25 @@ export async function submissionPage(ctx, id) {
   let aiInfo = null;                       // nhà cung cấp/model + key nào đã có (dùng cho chấm AI tự luận và phân tích AI trắc nghiệm)
   try { const [{ providers }, { vault }] = await Promise.all([get('/api/ai/providers'), get('/api/me/vault')]); aiInfo = { providers, vault }; } catch { aiInfo = null; }
   const root = h('div', { class: 'stack' });
-  const draw = () => root.replaceChildren(s.type === 'quiz' ? quizView(s, (n) => { s = n; draw(); }, aiInfo) : essayView(s, (n) => { s = n; draw(); }, aiInfo),
+  const draw = () => root.replaceChildren(s.type === 'quiz' ? quizView(s, (n) => { s = n; draw(); }, aiInfo) : s.type === 'flashcard' ? flashcardView(s) : essayView(s, (n) => { s = n; draw(); }, aiInfo),
     h('div', { class: 'row' }, h('a', { class: 'btn', href: s.shareId ? `#/s/${s.shareId}/play` : `#/${s.type}/${s.itemId}` }, 'Làm lại'), s.shareId ? h('a', { class: 'btn', href: `#/s/${s.shareId}/history` }, '📊 Biểu đồ điểm của nhóm') : null, h('a', { class: 'btn ghost', href: '#/history' }, 'Lịch sử'),
       s.shareId ? h('span', { class: 'muted', title: 'Bài nộp từ link chia sẻ đã nằm trong biểu đồ chung nên không xoá được' }, '🔒 Không xoá được (bài chia sẻ)')
         : h('button', { class: 'btn ghost danger', onclick: async () => { if (await confirmBox('Xoá bài nộp này?')) { try { await del(`/api/submissions/${id}`); toast('Đã xoá', 'ok'); ctx.go('/history'); } catch (e) { toast(e.message, 'err'); } } } }, 'Xoá bài nộp')));
   draw();
   return root;
+}
+
+
+function flashcardView(s) {
+  const pct = s.max ? Math.round((s.score / s.max) * 100) : 0;
+  const cards = (s.snapshot && s.snapshot.cards) || [];
+  return h('div', { class: 'stack' },
+    h('div', { class: 'card center' }, h('h2', null, s.title),
+      h('div', { class: `bigscore ${pctClass(pct)}` }, `${s.score}/${s.max}`),
+      h('p', { class: 'muted' }, `${s.correctCount}/${s.total} đúng · ${pct}% · ${fmtDate(s.submittedAt)} · ${fmtDur(s.durationSec)}`)),
+    h('div', { class: 'card' }, h('h3', null, 'Bộ flashcard đã làm'),
+      cards.length ? cards.map((c, i) => h('div', { class: 'subrow' }, h('span', { class: 'badge flashcard' }, `Thẻ ${i + 1}`), h('span', { class: 'grow' }, c.front), h('span', { class: 'muted' }, c.back))) : h('p', { class: 'muted' }, 'Không có dữ liệu thẻ trong bản lưu.'))
+  );
 }
 
 const PART_TITLES = { mcq: 'Phần 1 · Trắc nghiệm nhiều đáp án', tf: 'Phần 2 · Đúng / Sai', fill: 'Phần 3 · Điền số liệu / đáp án' };
@@ -105,7 +118,7 @@ function aiGradePanel(s, set, info) {
     provSel.addEventListener('change', () => { cur = provSel.value; drawPick(); });
     if (p.allowCustomModel) modelEl = h('input', { list: 'ai-models-sub', value: saved, placeholder: `Model (mặc định: ${p.defaultModel})`, maxlength: 100, autocomplete: 'off', 'aria-label': 'Model' });
     else modelEl = h('select', { 'aria-label': 'Model', ...pickerAttrs('model') }, h('option', { value: '', selected: !saved }, `Model mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === saved }, m)));
-    row.replaceChildren(provSel, modelEl, p.allowCustomModel ? h('datalist', { id: 'ai-models-sub' }, ...p.models.map((m) => h('option', { value: m }))) : null, btn);
+    row.replaceChildren(provSel, modelEl, ...(p.allowCustomModel ? [h('datalist', { id: 'ai-models-sub' }, ...p.models.map((m) => h('option', { value: m })))] : []), btn);
     enhancePickers(row);
   };
   drawPick();
@@ -160,7 +173,7 @@ function aiAnalyzePanel(s, set, info) {
     provSel.addEventListener('change', () => { cur = provSel.value; drawPick(); });
     if (p.allowCustomModel) modelEl = h('input', { list: 'ai-models-an', value: saved, placeholder: `Model (mặc định: ${p.defaultModel})`, maxlength: 100, autocomplete: 'off', 'aria-label': 'Model' });
     else modelEl = h('select', { 'aria-label': 'Model' }, h('option', { value: '', selected: !saved }, `Model mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === saved }, m)));
-    row.replaceChildren(provSel, modelEl, p.allowCustomModel ? h('datalist', { id: 'ai-models-an' }, ...p.models.map((m) => h('option', { value: m }))) : null, btn);
+    row.replaceChildren(provSel, modelEl, ...(p.allowCustomModel ? [h('datalist', { id: 'ai-models-an' }, ...p.models.map((m) => h('option', { value: m })))] : []), btn);
   };
   drawPick();
   btn.addEventListener('click', action(btn, async () => {

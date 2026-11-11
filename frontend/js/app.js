@@ -10,12 +10,18 @@ import { settingsPage, aiSettingsPage } from './pages/settings.js';
 import { promptsPage, promptEditorPage } from './pages/prompts.js';
 import { itemHistoryPage } from './pages/itemHistory.js';
 import { sharePage, sharePlayPage, shareHistoryPage, lessonLinkPage } from './pages/share.js';
+import { appsPage, flashcardsHubPage, flashcardEditorPage, flashcardStudyPage } from './pages/flashcards.js';
 
 // Định tuyến bằng #hash → đổi trang / tải lại luôn chạy được trên GitHub Pages (không cần server rewrite).
 const routes = [
   [/^\/login$/, loginPage, { guest: true }],
   [/^\/$/, homePage],
   [/^\/history$/, historyPage],
+  [/^\/apps$/, appsPage],
+  [/^\/flashcards$/, flashcardsHubPage],
+  [/^\/flashcard\/new$/, (c) => flashcardEditorPage(c, null)],
+  [/^\/flashcard\/([a-f0-9_]+)\/edit$/, (c, m) => flashcardEditorPage(c, m[1])],
+  [/^\/flashcard\/([a-f0-9_]+)$/, (c, m) => flashcardStudyPage(c, m[1])],
   [/^\/prompts$/, promptsPage],
   [/^\/prompts\/new$/, (c) => promptEditorPage(c, null)],
   [/^\/prompts\/([a-f0-9_]+)\/edit$/, (c, m) => promptEditorPage(c, m[1])],
@@ -28,7 +34,7 @@ const routes = [
   [/^\/quiz\/([a-f0-9_]+)\/edit$/, (c, m) => quizEditorPage(c, m[1])],
   [/^\/quiz\/([a-f0-9_]+)$/, (c, m) => quizPracticePage(c, m[1])],
   [/^\/submission\/([a-f0-9_]+)$/, (c, m) => submissionPage(c, m[1])],
-  [/^\/(quiz|essay)\/([a-f0-9_]+)\/history$/, (c, m) => itemHistoryPage(c, m[1], m[2])],
+  [/^\/(quiz|essay|flashcard)\/([a-f0-9_]+)\/history$/, (c, m) => itemHistoryPage(c, m[1], m[2])],
   [/^\/s\/([a-f0-9_]+)$/, (c, m) => sharePage(c, m[1])],
   [/^\/s\/([a-f0-9_]+)\/play$/, (c, m) => sharePlayPage(c, m[1])],
   [/^\/s\/([a-f0-9_]+)\/history$/, (c, m) => shareHistoryPage(c, m[1])],
@@ -43,12 +49,12 @@ export const go = (path) => { location.hash = '#' + path; };
 function renderTop() {
   const s = session.get();
   const cur = '#' + (location.hash.replace(/^#/, '').split('?')[0] || '/');
-  const link = (href, text) => h('a', { href, class: cur === href || (href === '#/settings' && cur.startsWith('#/settings')) || (href === '#/prompts' && cur.startsWith('#/prompts')) ? 'on' : '' }, text);
+  const link = (href, text) => h('a', { href, class: cur === href || (href === '#/settings' && cur.startsWith('#/settings')) || (href === '#/prompts' && cur.startsWith('#/prompts')) || (href === '#/apps' && /^#\/(apps|flashcards?)(\/|$)/.test(cur)) ? 'on' : '' }, text);
   top.hidden = !s;                                  // chưa đăng nhập: trang đăng nhập tự có logo riêng
   top.replaceChildren(
     h('a', { class: 'brand', href: '#/' }, logo(), h('div', null, h('b', null, 'Tự luyện thi của mnha'))),
     s ? h('nav', null,
-      link('#/', 'Bài của tôi'), link('#/history', 'Lịch sử'), link('#/prompts', 'Prompt AI'), link('#/settings', 'Cài đặt'),
+      link('#/', 'Bài của tôi'), link('#/apps', 'Ứng dụng'), link('#/history', 'Lịch sử'), link('#/prompts', 'Prompt AI'), link('#/settings', 'Cài đặt'),
       h('span', { class: 'me' }, h('span', { class: 'avatar' }, (s.user.email || s.user.displayName || s.user.username || '?').trim().charAt(0).toUpperCase()),
         h('span', { class: 'who', title: s.user.email || s.user.username }, s.user.email || s.user.username),   // email đăng nhập; tài khoản cũ chưa có email thì hiện tên đăng nhập
         h('button', { class: 'btn small ghost', onclick: async () => { await logout(); go('/login'); } }, 'Đăng xuất'))) : null,
@@ -67,16 +73,17 @@ async function render() {
   imageCtx.share = null;                           // mỗi trang tự đặt lại nếu đang xem bài chia sẻ
   if (!route[2] || !route[2].guest) { if (!s) { if (/^\/(s|lessons)\//.test(path)) nextPage.save(raw); return go('/login'); } }   // link chia sẻ: bắt đăng nhập rồi quay lại đúng bài
   else if (s) return go(nextPage.take() || '/');
-  app.replaceChildren(spinner());
+  app.classList.remove('wide'); app.replaceChildren(spinner());
   const ctx = { query: new URLSearchParams(qs || ''), setCleanup: (f) => { cleanup = f; }, go, isCurrent: () => token === navToken };
   try {
     const node = await route[1](ctx, route[0].exec(path));
     if (token !== navToken) return;
     app.replaceChildren(node); window.scrollTo(0, 0);
+    app.classList.toggle('wide', !!(node && node.querySelector && node.querySelector('.exam-page, .ep-page')));   // trang làm bài rộng như luyen-thi
   } catch (e) {
     if (token !== navToken) return;
     if (e.status === 401) { session.clear(); if (/^\/(s|lessons)\//.test(path)) nextPage.save(raw); return go('/login'); }
-    app.replaceChildren(errorBox(e, render));
+    app.classList.remove('wide'); app.replaceChildren(errorBox(e, render));
   }
 }
 

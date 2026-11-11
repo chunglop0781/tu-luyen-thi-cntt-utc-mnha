@@ -68,7 +68,8 @@ Trang **Cài đặt → Kiểm tra kết nối** chạy `/api/health?deep=1` nga
 
 ## Tính năng
 Tạo/sửa/xoá bài **tự luận** (đề, đáp án mẫu — dán HTML do AI sinh từ ảnh đề bằng prompt mẫu có sẵn, tiêu chí từ khoá, ảnh, đếm giờ) và **trắc nghiệm 3 phần** chuyển nguyên từ bản cũ `luyen-thi-cntt-utc-mnha`: Phần 1 nhiều đáp án, Phần 2 Đúng/Sai theo từng ý (chia đều hoặc THPTQG), Phần 3 điền số liệu (sai số, nhiều cách viết); dán 3 khối text theo quy luật `- câu / +) đáp án / => đáp án / ++) giải thích`, câu hỏi chùm `*)/1-3/`, `//image:`, prompt mẫu nhờ AI tạo đề, audio bài nghe, **xáo trộn thứ tự câu** (câu chùm đi liền nhau), đếm giờ + chuông, đánh dấu câu, nháp tự lưu · tự luận: chấm bằng AI bằng **key của chính bạn** · trắc nghiệm: **Phân tích AI** (chủ đề hay sai, vì sao sai từng câu, kế hoạch ôn; tối đa 5 lần/bài nộp, giãn cách 30 giây) · lịch sử bài nộp (trang `#/quiz|essay/<id>/history`: thống kê + biểu đồ điểm theo thời gian như luyen-thi) · xuất JSON · dựng lại chỉ mục.
-Không có trong bản này (so với bản cũ): MongoDB, admin/duyệt user, slide/video/flashcard/tài liệu, Cloudinary.
+**Ứng dụng → 🃏 Flashcards** (chuyển từ `/apps` + `/flashcards` của bản cũ): tạo bộ thẻ bằng cú pháp `+) từ / ++) phiên âm / => nghĩa` (Học ngoại ngữ có Nghe & Đọc bằng Web Speech API, hoặc Học lý thuyết), xem trước, prompt AI chuyển đổi, thêm ảnh (mã hoá), học bằng **🃏 Thẻ học · ✍️ Luyện tập (4 cấp, lặp cách quãng) · 📝 Kiểm tra thang 10**; kết quả Kiểm tra lưu vào lịch sử + biểu đồ điểm; **🔗 Chia sẻ** bằng link y như bài trắc nghiệm / tự luận (người làm không cần quyền gì, bài nộp nằm kho riêng của họ, chủ bài xem lịch sử có tên, người làm chỉ thấy điểm mình + biểu đồ ẩn danh).
+Không có trong bản này (so với bản cũ): MongoDB, admin/duyệt user, slide/video/tài liệu, Cloudinary.
 Thanh trên cùng hiện **email đăng nhập** (tài khoản cũ chưa có email thì hiện tên đăng nhập).
 
 ## Nhà cung cấp AI (Cài đặt → tab "Nhà cung cấp AI")
@@ -95,7 +96,7 @@ Thanh trên cùng hiện **email đăng nhập** (tài khoản cũ chưa có ema
 ## Kiểm thử
 ```
 cd backend
-npm test            # 48 kịch bản tích hợp với GitHub giả lập (không cần mạng)
+npm test            # 73 kịch bản tích hợp với GitHub giả lập (không cần mạng; gồm Flashcard + chia sẻ)
 npm run test:ui     # trình duyệt thật (Playwright): đăng nhập bằng email, Cài đặt → Nhà cung cấp AI, tạo/làm đề 3 phần, chấm & phân tích AI
 ```
 Sandbox khi kiểm thử không có mạng nên `bcryptjs` được thay bằng bản giả trong `backend/test/stubs` (cùng API `hash/compare`); **khi chạy thật Vercel cài `bcryptjs` thật** từ `package.json`. Thư mục `test/` không ảnh hưởng khi deploy.

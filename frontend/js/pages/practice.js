@@ -15,7 +15,7 @@ function injectCss() {
   if (document.getElementById('ep-css')) return;
   const s = document.createElement('style'); s.id = 'ep-css';
   s.textContent = `
-.ep-page{max-width:1400px;margin:0 auto}.ep-page *{box-sizing:border-box}
+.ep-page{max-width:1400px;margin:28px auto 60px;padding:0 4%}.ep-page *{box-sizing:border-box}
 .ep-prompt{padding:10px 14px;border-radius:10px;border:1px solid #c7d2fe;background:#eef2ff;color:#3730a3;font-size:14px;margin-bottom:14px}
 .ep-prompt.fb{background:#f9fafb;border-color:#e5e7eb;color:#374151}.ep-prompt.bad{background:#fef2f2;border-color:#fecaca;color:#991b1b}
 .ep-prompt small{opacity:.8}.ep-prompt .w{margin-top:4px;font-size:12px;font-weight:600}
@@ -113,7 +113,7 @@ export async function essayPractice(ctx, id, opts = {}) {
     else modelEl = h('select', { id: 'epModel', 'aria-label': 'Model', ...pickerAttrs('model') }, h('option', { value: '', selected: !saved }, `Mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === saved }, m)));
     modelEl.addEventListener('change', () => { if (connected) { connected = false; lockUi(); setPill('', 'Chưa kiểm tra', 'Đổi model — hãy kiểm tra lại kết nối.'); } });
     selBox.replaceChildren(h('div', null, h('label', { for: 'epProv' }, '🔑 AI: '), provSel), h('div', null, h('label', { for: 'epModel' }, '🤖 Model: '), modelEl),
-      p.allowCustomModel ? h('datalist', { id: 'ep-models' }, ...p.models.map((m) => h('option', { value: m }))) : null, rndBtn);
+      ...(p.allowCustomModel ? [h('datalist', { id: 'ep-models' }, ...p.models.map((m) => h('option', { value: m })))] : []), rndBtn);
     rndBtn.hidden = !(p.models && p.models.length);
     enhancePickers(selBox);          // ô chọn AI / model có tìm kiếm (chép từ subjectPicker.js của luyen-thi)
   };

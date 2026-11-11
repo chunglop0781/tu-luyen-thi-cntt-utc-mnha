@@ -3,6 +3,7 @@ import { h, toast, action, fmtDate, pctClass } from '../ui.js';
 import { scoreChart } from '../scoreChart.js';
 import { quizPracticePage } from './quiz.js';
 import { essayPractice } from './practice.js';
+import { flashcardStudyPage } from './flashcards.js';
 
 /** Link chia sẻ: dùng đúng địa chỉ trang đang mở (GitHub Pages) + #/s/<id>. */
 export const shareLink = (sid) => `${location.origin}${location.pathname}#/s/${sid}`;
@@ -46,14 +47,14 @@ export async function openShareDialog(item, onChange) {
 export async function sharePage(ctx, sid) {
   imageCtx.share = sid;
   const { share, item } = await get(`/api/shares/${sid}`);
-  const essay = item.type === 'essay';
-  const total = essay ? null : Object.values(item.parts).reduce((n, p) => n + p.questions.length, 0);
+  const essay = item.type === 'essay', flashcard = item.type === 'flashcard';
+  const total = essay ? null : flashcard ? item.cards.length : Object.values(item.parts).reduce((n, p) => n + p.questions.length, 0);
   const fact = (v, l) => h('div', null, h('b', null, v), h('span', null, l));
   return h('div', { class: 'stack share-landing' },
     h('div', { class: 'card center stack' },
-      h('span', { class: `badge ${essay ? 'essay' : 'quiz'}` }, essay ? 'Bài tự luận được chia sẻ' : 'Bài trắc nghiệm được chia sẻ'),
+      h('span', { class: `badge ${essay ? 'essay' : flashcard ? 'flashcard' : 'quiz'}` }, essay ? 'Bài tự luận được chia sẻ' : flashcard ? 'Bộ flashcard được chia sẻ' : 'Bài trắc nghiệm được chia sẻ'),
       h('h2', null, item.title), item.subject ? h('p', { class: 'muted' }, item.subject) : null,
-      h('div', { class: 'qx-facts-lite' }, essay ? null : fact(total, 'câu hỏi'), fact(item.duration === null ? '∞' : item.duration, item.duration === null ? 'không đếm giờ' : 'phút'), fact(item.maxScore, 'thang điểm')),
+      h('div', { class: 'qx-facts-lite' }, essay ? null : fact(total, flashcard ? 'thẻ' : 'câu hỏi'), flashcard ? null : fact(item.duration === null ? '∞' : item.duration, item.duration === null ? 'không đếm giờ' : 'phút'), fact(flashcard ? 10 : item.maxScore, 'thang điểm')),
       share.isOwner ? h('p', { class: 'muted' }, 'Đây là bài của bạn — bạn thấy tên từng người đã nộp ở trang lịch sử.') : h('p', { class: 'muted' }, 'Điểm và bài làm của bạn được lưu trong tài khoản của bạn. Chủ bài chỉ biết bạn đã nộp và điểm số.'),
       essay && !share.isOwner ? h('p', { class: 'muted' }, 'Bài tự luận được AI chấm bằng API key của chính bạn (thêm ở Cài đặt → Nhà cung cấp AI). Bài nộp không xoá được và chỉ chấm một lần.') : null,
       h('div', { class: 'row', style: 'justify-content:center' }, h('a', { class: 'btn primary', href: `#/s/${sid}/play` }, '▶ Làm bài'), h('a', { class: 'btn', href: `#/s/${sid}/history` }, share.isOwner ? '📊 Lịch sử của tất cả người làm' : '📊 Lịch sử & biểu đồ điểm'))));
@@ -63,6 +64,7 @@ export async function sharePage(ctx, sid) {
 export async function sharePlayPage(ctx, sid) {
   const { item, share } = await get(`/api/shares/${sid}`);
   if (item.type === 'essay') return essayPractice(ctx, sid, { shareId: sid, item, isOwner: share.isOwner });
+  if (item.type === 'flashcard') return flashcardStudyPage(ctx, sid, { shareId: sid, item, isOwner: share.isOwner });
   return quizPracticePage(ctx, sid, { shareId: sid, item, isOwner: share.isOwner });
 }
 

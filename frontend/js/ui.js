@@ -1,5 +1,14 @@
 import { imageUrl } from './api.js';
 
+/* DOM gốc: append / prepend / replaceChildren(null) in ra chữ "null" (lỗi từng hiện cạnh nút 🎲 ở thanh AI).
+   Lọc null / undefined / false cho mọi nơi gọi, để một biểu thức điều kiện `cond ? node : null` không bao giờ lộ chữ "null". */
+for (const m of ['append', 'prepend', 'replaceChildren']) {
+  for (const P of [Element.prototype, DocumentFragment.prototype]) {
+    const orig = P[m]; if (typeof orig !== 'function' || orig.__nullSafe) continue;
+    const safe = function (...a) { return orig.apply(this, a.filter((x) => x != null && x !== false)); }; safe.__nullSafe = true; P[m] = safe;
+  }
+}
+
 /** Tạo phần tử DOM an toàn (mọi chuỗi đều qua textContent — không XSS). */
 export function h(tag, props, ...kids) {
   const el = document.createElement(tag);

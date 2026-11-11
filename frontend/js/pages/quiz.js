@@ -14,7 +14,7 @@ const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</
 const PART_TITLES = { mcq: 'Trắc nghiệm nhiều đáp án', tf: 'Đúng / Sai', fill: 'Điền số liệu / đáp án' };
 
 /** Ảnh mã hoá: <img src="[img:ID]"> do mã cũ dựng → tự tải qua API (cần token) rồi thay bằng blob URL. */
-function watchEncryptedImages(root) {
+export function watchEncryptedImages(root) {
   const fix = (img) => {
     const m = /^\[img:([0-9]+\.[a-f0-9]{16,32})\]$/.exec(img.getAttribute('src') || '');
     if (!m) return;
@@ -226,7 +226,7 @@ function takeHtml(item, view, cfg) {
     .qx-facts strong { display: block; font-size: 28px; color: #0f172a; line-height: 1.1; } .qx-facts span { font-size: 13px; color: #64748b; }
     .qx-rules { text-align: left; margin: 0 0 24px; padding-left: 20px; color: #334155; line-height: 1.7; font-size: 14px; }
     .qx-start-btn { width: 100%; padding: 14px 20px; border: 0; border-radius: 12px; background: #2563eb; color: #fff; font-size: 17px; font-weight: 700; cursor: pointer; } .qx-start-btn:hover { background: #1d4ed8; }
-    .quiz-pre { max-width: 1100px; margin: 0 auto 10px; } .quiz-back { color: #64748b; font-size: 14px; }
+    .quiz-pre { width: min(1500px, calc(100% - 28px)); margin: 12px auto -4px; } .quiz-back { color: #64748b; font-size: 14px; }
     .listen-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
     .listen-head { display: flex; align-items: center; gap: 10px; min-width: 180px; } .listen-head small { display: block; color: #64748b; font-size: 12px; } .listen-icon { font-size: 24px; }
     .listen-bar audio { flex: 1 1 280px; min-width: 0; max-width: 100%; } .listen-msg { flex-basis: 100%; color: #b91c1c; font-size: 13px; } .listen-msg[hidden] { display: none; }

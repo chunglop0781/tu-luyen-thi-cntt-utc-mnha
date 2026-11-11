@@ -18,6 +18,27 @@ function common(input, type) {
   return { type, title, subject: clampStr(input.subject, 60), tags: (Array.isArray(input.tags) ? input.tags : []).slice(0, 10).map((t) => clampStr(t, 30)).filter(Boolean) };
 }
 
+
+function sanitizeFlashcard(input) {
+  const base = common(input, 'flashcard');
+  const mode = input.mode === 'theory' ? 'theory' : 'language';
+  const language = clampStr(input.language || 'en-US', 20);
+  const description = clampStr(input.description, 1000);
+  const raw = clampStr(input.content, 200000);
+  if (!raw.trim()) throw bad('Thiếu nội dung flashcard');
+  const { parse } = require('./flashcardParser');
+  const p = parse(raw, mode);
+  if (p.errors.length) throw new HttpError(400, `Flashcard chưa hợp lệ: ${p.errors[0].message}${p.errors.length > 1 ? ` (và ${p.errors.length - 1} lỗi nữa)` : ''}`, 'VALIDATION', p.errors);
+  const cards = p.cards.map((c, i) => ({
+    id: isId(c.id) ? c.id : `c${i + 1}`,
+    front: clampStr(c.front, 600),
+    back: clampStr(c.back, 2000),
+    ipa: mode === 'language' ? clampStr(c.ipa, 120) : '',
+    image: c.image || ''
+  }));
+  return { ...base, description, mode, language, raw, cards, maxScore: 10, images: imageRefs(raw, JSON.stringify(cards)) };
+}
+
 function sanitizeEssay(input) {
   const base = common(input, 'essay');
   const prompt = clampStr(input.prompt, 20000);
@@ -140,4 +161,4 @@ function parseQuizText(text) {
   return qs.map((q) => ({ ...q, correct: [...new Set(q.correct)], multiple: q.correct.length > 1 }));
 }
 
-module.exports = { sanitizeEssay, sanitizeQuiz, previewQuiz, rawTexts, buildQuiz, parseQuizText, imageRefs, IMG_TOKEN, bad, isId };
+module.exports = { sanitizeEssay, sanitizeFlashcard, sanitizeQuiz, previewQuiz, rawTexts, buildQuiz, parseQuizText, imageRefs, IMG_TOKEN, bad, isId };
