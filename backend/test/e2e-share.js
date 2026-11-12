@@ -50,7 +50,9 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     ok((await bob.$$('.hc svg circle')).length === 1, 'biểu đồ có điểm của bob');
     ok(!(await bob.content()).includes('carol') && !(await bob.content()).includes('alice'), 'bob không thấy tên người khác');
     ok(await bob.isVisible('a:has-text("Xem chi tiết")'), 'bob có nút xem bài làm của mình');
-    await bob.click('a:has-text("Xem chi tiết")'); await bob.waitForSelector('.bigscore'); ok(true, 'xem lại bài làm của mình');
+    await bob.click('a:has-text("Xem chi tiết")'); await bob.waitForSelector('.qr-page .qr-card'); ok((await bob.textContent('.qr-page')).includes('Bản đồ câu hỏi'), 'xem lại bài làm của mình (giao diện kết quả trắc nghiệm bản luyen-thi)');
+    await bob.click('.qr-fbtn[data-filter="wrong"]'); await bob.click('.qr-fbtn[data-filter="all"]'); ok(await bob.isVisible('.qr-q'), 'bộ lọc câu hỏi hoạt động');
+    if (process.env.SHOT) { await bob.setViewportSize({ width: 1100, height: 1400 }); await bob.screenshot({ path: process.env.SHOT + '/quiz-light.png', fullPage: true }); await bob.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark')); await bob.screenshot({ path: process.env.SHOT + '/quiz-dark.png', fullPage: true }); await bob.evaluate(() => document.documentElement.setAttribute('data-theme', 'light')); }
     await bob.goto(WEB); await bob.waitForSelector('text=Bài được chia sẻ với tôi'); ok(true, 'trang chủ bob có mục "Bài được chia sẻ với tôi"');
 
     console.log('Người thứ hai (carol) nộp để biểu đồ có nhiều điểm');
@@ -69,7 +71,7 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     ok((await alice.$$('.hc svg circle')).length === 2, 'chủ bài thấy 2 điểm');
     const names = await alice.$$eval('.tbl tbody tr td:first-child', (e) => e.map((x) => x.textContent).sort()); ok(names.join() === 'BOB,CAROL', 'bảng liệt kê tên từng người nộp: ' + names);
     ok(await alice.isVisible('.tbl a:has-text("Xem chi tiết")'), 'chủ bài có nút "Xem chi tiết" cho bài của từng người');
-    await alice.locator('.tbl tbody tr:has-text("BOB") a:has-text("Xem chi tiết")').click(); await alice.waitForSelector('.sd-page, .bigscore'); ok(/\/submission\//.test(alice.url()), 'chủ bài mở được chi tiết bài của BOB (chỉ đọc)');
+    await alice.locator('.tbl tbody tr:has-text("BOB") a:has-text("Xem chi tiết")').click(); await alice.waitForSelector('.sd-page, .qr-page'); ok(/\/submission\//.test(alice.url()), 'chủ bài mở được chi tiết bài của BOB (chỉ đọc)');
     ok(!(await alice.isVisible('button:has-text("Xoá bài nộp")')), 'trang chi tiết của chủ bài không có nút xoá');
     console.log('Chia sẻ bài tự luận (bob nộp, AI chấm bằng key của bob)');
     const eid = 'b1c2d3e4f5a60718';

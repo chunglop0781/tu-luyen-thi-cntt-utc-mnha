@@ -2,6 +2,7 @@ import { get, patch, post, del, imageCtx } from '../api.js';
 import { h, action, toast, rich, fmtDate, fmtDur, pctClass, confirmBox, safeHtml, richOrHtml } from '../ui.js';
 import { aiTitle, pickerAttrs, enhancePickers, modelSelect } from '../aiName.js';
 import { essayDetail } from './submissionDetail.js';
+import { renderQuizResult } from './quizResult.js';
 
 export async function submissionPage(ctx, id) {
   let { submission: s } = await get(`/api/submissions/${id}`);
@@ -11,7 +12,7 @@ export async function submissionPage(ctx, id) {
   const root = h('div', { class: 'stack' });
   const actions = () => {
     const sid = s.shareId || s.inShare || null;                // bài đã nằm trong lịch sử chia sẻ (qua link, hoặc chủ bài tự làm) → không xoá được
-    return h('div', { class: s.type === 'essay' ? 'sd-actions' : 'row' },
+    return h('div', { class: s.type === 'essay' ? 'sd-actions' : 'row qr-actions' },
       h('a', { class: 'btn', href: s.shareId ? `#/s/${s.shareId}/play` : `#/${s.type}/${s.itemId}` }, 'Làm lại'),
       sid ? h('a', { class: 'btn', href: `#/s/${sid}/history` }, s.shareId ? '📊 Biểu đồ điểm của tôi' : '📊 Lịch sử của tất cả người làm') : null,
       h('a', { class: 'btn ghost', href: '#/history' }, 'Lịch sử'),
@@ -54,49 +55,16 @@ function flashcardView(s) {
   );
 }
 
-const PART_TITLES = { mcq: 'Phần 1 · Trắc nghiệm nhiều đáp án', tf: 'Phần 2 · Đúng / Sai', fill: 'Phần 3 · Điền số liệu / đáp án' };
-const tfWord = (v) => (v === true ? 'Đúng' : v === false ? 'Sai' : 'Bỏ trống');
-const expl = (html) => (html ? h('div', { class: 'expl' }, '💡 ', safeHtml(html)) : null);
-const imgOf = (src) => (src ? (/^\[img:/.test(src) ? rich(src) : null) : null);
-
-/** Kết quả đề 3 phần (đáp án đúng/sai từng câu, từng ý Đúng-Sai, ô điền) — cùng cách đánh số "Câu N" với màn làm bài và phân tích AI. */
+/** Trang chi tiết bài nộp TRẮC NGHIỆM — bố cục chép từ views/student/quiz-submission-detail.pug (tiêu đề + môn → kết quả → bản đồ câu → đáp án) ở quizResult.js;
+ *  khối phân tích AI của bản này (chọn AI / model, có kết quả bên dưới) nối thêm phía sau. */
 function quizView(s, set, aiInfo, { readOnly = false } = {}) {
-  const res = s.result || { items: [], parts: {} };
-  const pct = s.max ? Math.round((s.score / s.max) * 100) : 0;
-  const items = Object.fromEntries((res.items || []).map((r) => [r.id, r]));
-  const parts = (s.snapshot && s.snapshot.parts) || {};
-  const cards = []; let n = 0;
-  for (const k of ['mcq', 'tf', 'fill']) {
-    const p = parts[k]; if (!p || !p.questions.length) continue;
-    const ps = (res.parts || {})[k];
-    cards.push(h('h3', null, PART_TITLES[k], ps ? h('small', { class: 'muted' }, ` — ${ps.correct}/${ps.total} đúng · ${ps.earned}/${ps.points} điểm`) : null));
-    const clusters = Object.fromEntries((p.clusters || []).map((c) => [c.id, c])); let lastCl = null;
-    for (const q of p.questions) {
-      n++;
-      if (q.clusterId && q.clusterId !== lastCl && clusters[q.clusterId]) cards.push(h('div', { class: 'card rubric' }, h('b', null, 'Dữ kiện chung'), safeHtml(clusters[q.clusterId].text), imgOf(clusters[q.clusterId].image)));
-      lastCl = q.clusterId || null;
-      const it = items[q.id] || {};
-      let body, ok;
-      if (k === 'mcq') {
-        const chosen = Array.isArray(it.studentAnswer) ? it.studentAnswer : []; ok = !!it.correct;
-        body = [...q.options.map((o) => { const isC = (q.correct || []).includes(o.key), picked = chosen.includes(o.key);
-          return h('div', { class: `opt-r ${isC ? 'is-correct' : ''} ${picked && !isC ? 'is-wrong' : ''}` }, h('b', null, o.key + '.'), ' ', rich(o.text), picked ? h('small', null, ' ← bạn chọn') : null, isC ? h('small', null, ' ✔') : null); }), expl(q.explanationHtml)];
-      } else if (k === 'tf') {
-        const sts = q.statements.map((st) => ({ st, r: items[st.id] || {} })); ok = sts.every((x) => x.r.correct);
-        body = sts.map(({ st, r }) => h('div', { class: `opt-r ${r.correct ? 'is-correct' : 'is-wrong'}` }, rich(st.text), h('small', null, ` — đáp án: ${tfWord(st.correct)} · bạn chọn: ${tfWord(r.studentAnswer)} ${r.correct ? '✔' : '✘'}`), expl(st.explanationHtml)));
-      } else {
-        ok = !!it.correct;
-        body = [h('div', { class: `opt-r ${ok ? 'is-correct' : 'is-wrong'}` }, h('b', null, 'Bạn điền: '), it.studentAnswer || '(bỏ trống)', ok ? ' ✔' : null), ok ? null : h('div', { class: 'opt-r is-correct' }, h('b', null, 'Đáp án: '), (q.answers || []).join(' | ')), expl(q.explanationHtml)];
-      }
-      cards.push(h('div', { class: `card qcard ${ok ? 'right' : 'wrong'}`, id: `qc-${n}` }, h('b', null, `Câu ${n} ${ok ? '✅' : '❌'}`), ' ', rich(q.text), imgOf(q.image), ...body));
-    }
-  }
-  const root = h('div', { class: 'stack' },
-    h('div', { class: 'card center' }, h('h2', null, s.title), h('div', { class: `bigscore ${pctClass(pct)}` }, `${s.score}/${s.max}`),
-      h('p', null, `${s.correctCount}/${s.total} đúng · ${pct}% · ${fmtDur(s.durationSec)} · ${fmtDate(s.submittedAt)}`)),
-    ...cards, ...(readOnly ? [] : [...(s.aiAnalyses || []).map((a, i) => analysisCard(a, i + 1, aiInfo)), aiAnalyzePanel(s, set, aiInfo)]));
-  if (window.MathJax && window.MathJax.typesetPromise) setTimeout(() => window.MathJax.typesetPromise([root]).catch(() => {}), 0);
-  return root;
+  const result = renderQuizResult(s);
+  const ana = (s.aiAnalyses || []).slice().reverse();
+  return h('div', { class: 'qr-page' },
+    h('h1', { class: 'qr-h1' }, s.title), h('div', { class: 'qr-subj' }, s.subject || ''),
+    result,
+    ...(readOnly ? [] : [h('div', { class: 'qr-ai-wrap' }, aiAnalyzePanel(s, set, aiInfo)),
+      ana.length ? h('div', { class: 'qr-card' }, h('div', { class: 'qr-title' }, '🤖 Phân tích AI'), ...ana.map((a) => analysisCard(a, aiInfo, result))) : null]));
 }
 
 /** Các khối THAO TÁC dưới trang chi tiết tự luận (bản luyen-thi chấm ở trang làm bài nên không có): gợi ý tự động, tự chấm / ghi chú, chấm bằng AI. */
@@ -148,28 +116,28 @@ function aiGradePanel(s, set, info) {
 }
 
 
-// ───────── Phân tích AI cho trắc nghiệm ─────────
-const chips = (nums) => (nums || []).map((n) => h('a', { class: 'chip', title: `Tới câu ${n}`, onclick: () => {
+// ───────── Phân tích AI cho trắc nghiệm (giao diện .ai-* của quiz-result.pug) ─────────
+const chips = (nums, result) => (nums || []).map((n) => h('a', { class: 'ai-qid', href: `#qc-${n}`, title: `Tới câu ${n}`, onclick: (e) => {
+  e.preventDefault(); if (result && result.showAll) result.showAll();
   const el = document.getElementById(`qc-${n}`); if (!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1800);
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 } }, `Câu ${n}`));
 
-function analysisCard(a, no, info) {
+function analysisCard(a, info, result) {
   const lab = (p) => (info ? (info.providers.find((x) => x.id === p) || { label: p }).label : p);
   const r = a.result || {};
-  return h('div', { class: 'card an stack' },
-    h('h3', null, `🤖 Phân tích AI #${no}`),
-    h('div', { class: 'muted' }, h('span', { class: 'tag' }, `${a.provider ? lab(a.provider) + ' · ' : ''}${a.model}`), a.promptName ? h('span', { class: 'tag' }, `prompt: ${a.promptName}`) : null, a.at ? fmtDate(a.at) : '', a.fallbackFrom ? ` · model ${a.fallbackFrom} quá tải, đã tự chuyển` : ''),
-    r.summary ? h('div', null, h('h4', null, 'Tổng quan'), h('div', { class: 'sum' }, r.summary)) : null,
-    (r.weakTopics || []).length ? h('div', null, h('h4', null, `📚 Chủ đề cần ôn (${r.weakTopics.length})`),
-      ...r.weakTopics.map((t) => h('div', { class: 'item' }, h('b', null, t.topic), t.wrongCount != null ? h('span', { class: 'muted' }, ` — sai ${t.wrongCount} câu`) : null,
-        t.advice ? h('p', null, t.advice) : null, h('div', null, chips(t.questions))))) : null,
-    (r.mistakes || []).length ? h('div', null, h('h4', null, '📝 Phân tích từng câu sai'),
-      ...r.mistakes.map((m) => h('div', { class: 'item' }, h('div', null, chips([m.q])),
-        m.why ? h('p', null, h('b', null, 'Vì sao sai: '), h('span', { class: 'why' }, m.why)) : null,
-        m.correctReasoning ? h('p', null, h('b', null, 'Cách nghĩ đúng: '), h('span', { class: 'ok' }, m.correctReasoning)) : null,
-        m.tip ? h('p', null, h('b', null, 'Mẹo: '), m.tip) : null))) : null,
-    (r.studyPlan || []).length ? h('div', null, h('h4', null, '🗓️ Kế hoạch ôn tập'), h('ul', null, ...r.studyPlan.map((x) => h('li', null, x)))) : null);
+  return h('div', { class: 'ai-item' },
+    h('div', { class: 'ai-head' }, h('span', { class: 'ai-chip' }, a.provider ? lab(a.provider) : 'AI'), a.model ? h('span', null, a.model) : null, a.at ? h('span', null, new Date(a.at).toLocaleString('vi-VN')) : null,
+      a.promptName ? h('span', null, `Prompt: ${a.promptName}`) : null, a.fallbackFrom ? h('span', null, `model ${a.fallbackFrom} quá tải, đã tự chuyển`) : null),
+    r.summary ? h('div', { class: 'ai-summary' }, r.summary) : null,
+    (r.weakTopics || []).length ? [h('div', { class: 'ai-sec' }, '📚 Chủ đề cần ôn'),
+      ...r.weakTopics.map((t) => { const wc = (t.questions || []).length || t.wrongCount;
+        return h('div', { class: 'ai-topic' }, h('div', { class: 'ai-topic-head' }, h('span', { class: 'ai-topic-name' }, t.topic), wc != null ? h('span', { class: 'ai-badge' }, `${wc} câu sai`) : null),
+          (t.questions || []).length ? h('div', { class: 'ai-qids' }, chips(t.questions, result)) : null, t.advice ? h('div', { class: 'ai-advice' }, t.advice) : null); })] : null,
+    (r.mistakes || []).length ? [h('div', { class: 'ai-sec' }, '🔍 Lỗi cụ thể'),
+      ...r.mistakes.map((m) => h('div', { class: 'ai-mistake' }, chips([m.q], result), ` — ${m.why || ''}`,
+        m.correctReasoning ? h('div', { class: 'ai-right' }, h('b', null, 'Đúng:'), ` ${m.correctReasoning}`) : null, m.tip ? h('div', { class: 'ai-tip' }, `💡 ${m.tip}`) : null))] : null,
+    (r.studyPlan || []).length ? [h('div', { class: 'ai-sec' }, '🗺 Kế hoạch học'), h('ol', { class: 'ai-plan' }, ...r.studyPlan.map((x) => h('li', null, x)))] : null);
 }
 
 const MAX_ANALYSES = 5;
