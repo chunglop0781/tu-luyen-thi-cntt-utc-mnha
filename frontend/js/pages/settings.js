@@ -98,7 +98,7 @@ export async function aiSettingsPage() {
     }));
     const rmKey = h('button', { class: 'btn ghost danger' }, 'Xoá key');
     rmKey.addEventListener('click', action(rmKey, async () => { if (!(await confirmBox(`Xoá key ${p.label} đã lưu?`))) return; await put('/api/me/vault', { providers: { [p.id]: { key: '' } } }); toast('Đã xoá key', 'ok'); await reload(); }));
-    const editBtn = p.builtin ? null : h('button', { class: 'btn ghost' }, '✏️ Sửa nhà cung cấp');   // key nhận: server tự khoá địa chỉ API
+    const editBtn = p.builtin || p.kind === 'gemini' ? null : h('button', { class: 'btn ghost' }, '✏️ Sửa nhà cung cấp');   // key nhận: server tự khoá địa chỉ API
     if (editBtn) editBtn.addEventListener('click', () => { card.replaceWith(providerForm(p)); });
     const delBtn = p.builtin ? null : h('button', { class: 'btn ghost danger' }, '🗑 Xoá nhà cung cấp');
     if (delBtn) delBtn.addEventListener('click', action(delBtn, async () => { if (!(await confirmBox(`Xoá nhà cung cấp "${p.label}" cùng key đã lưu?`))) return; await del(`/api/ai/providers/${p.id}`); toast('Đã xoá', 'ok'); await reload(); }));

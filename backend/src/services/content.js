@@ -10,7 +10,7 @@ const { gradeEssay } = require('./gemini');
 const { callAi } = require('./ai');
 const { analyzeQuiz } = require('./analysis');
 const { createPrompts } = require('./prompts');
-const { PRESETS, MAX_PROVIDERS, geminiProvider, normalizeProviderInput, sanitizeDocument, findProvider, safeModel, publicProvider, publicPresets } = require('../aiModels');
+const { PRESETS, MAX_PROVIDERS, geminiProvider, geminiClone, normalizeProviderInput, sanitizeDocument, findProvider, safeModel, publicProvider, publicPresets } = require('../aiModels');
 const { encryptText, decryptText, deriveKey } = require('../crypto');
 
 const TYPES = { essay: 'essays', quiz: 'quizzes', flashcard: 'flashcards' };
@@ -529,7 +529,6 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     const already = mine.find((q) => createdByOf(md, q.id) === ownerId && (q.id === id || q.id.startsWith(id.slice(0, 20) + '-')));
     let blocked = null;
     if (uid === ownerId) blocked = 'Đây là key của chính bạn';
-    else if (id === 'gemini' && keyOf(md, 'gemini', uid) && !createdByOf(md, 'gemini')) blocked = 'Bạn đã có API key Google Gemini của riêng mình — xoá key đó trước nếu muốn nhận key này';
     else if (!already && mine.length >= MAX_PROVIDERS) blocked = `Danh sách AI của bạn đã đủ ${MAX_PROVIDERS} nhà cung cấp`;
     return { key: { id, label: p.label, kind: p.kind, host: p.baseUrl ? new URL(p.baseUrl).host : 'generativelanguage.googleapis.com', models: p.models.slice(0, 8), name: (d.names && d.names[id]) || '', createdBy: ownerId }, already: !!already, blocked };
   }
@@ -542,19 +541,17 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     const or = await store.read('account', vaultPath(ownerId)); const od = or.data;
     const secret = keyOf(od, id, ownerId);
     const mine = await userProviders(uid); const mr = await store.read('account', vaultPath(uid), { fresh: true }); const md = mr ? mr.data : {};
-    // id đích: gemini → gemini; nhà khác → giữ id, nếu trùng (không phải bản nhận trước đó từ cùng chủ) thì thêm hậu tố
+    // id đích: giữ id của chủ key; trùng với nhà đang có (kể cả Gemini dựng sẵn của người nhận) → đặt id mới, KHÔNG đè key sẵn có
     let newId = id, refresh = false;
-    if (id !== 'gemini') {
-      const prior = mine.find((q) => createdByOf(md, q.id) === ownerId && (q.id === id || q.id.startsWith(id.slice(0, 20) + '-')));
-      if (prior) { newId = prior.id; refresh = true; }
-      else {
-        const taken = new Set(mine.map((q) => q.id)); newId = id;
-        for (let i = 0; taken.has(newId) && i < 50; i++) newId = `${id.slice(0, 20)}-${i === 0 ? ownerId.replace(/[^a-z0-9]/g, '').slice(0, 5) : randomId(4).toLowerCase()}`;
-        if (taken.has(newId)) throw new HttpError(409, 'Không tạo được mã AI key', 'EXISTS');
-      }
+    const prior = mine.find((q) => createdByOf(md, q.id) === ownerId && (q.id === id || q.id.startsWith(id.slice(0, 20) + '-')));
+    if (prior) { newId = prior.id; refresh = true; }
+    else {
+      const taken = new Set(mine.map((q) => q.id));
+      for (let i = 0; taken.has(newId) && i < 50; i++) newId = `${id.slice(0, 20)}-${i === 0 ? ownerId.replace(/[^a-z0-9]/g, '').slice(0, 5) : randomId(4).toLowerCase()}`;
+      if (taken.has(newId)) throw new HttpError(409, 'Không tạo được mã AI key', 'EXISTS');
     }
-    if (id !== 'gemini' && !refresh) {
-      const n = normalizeProviderInput({ ...src, id: newId });
+    if (!refresh) {
+      const n = src.kind === 'gemini' ? { value: geminiClone(newId, src.label, cfg) } : normalizeProviderInput({ ...src, id: newId });
       if (!n.value) throw new HttpError(400, n.errors[0], 'VALIDATION');
       await saveAiDoc(uid, mine.concat([n.value]));
     }

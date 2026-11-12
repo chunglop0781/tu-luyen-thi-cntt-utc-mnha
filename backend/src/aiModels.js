@@ -47,6 +47,12 @@ function geminiProvider(cfg = {}) {
   return { id: 'gemini', label: 'Google Gemini', kind: 'gemini', builtin: true, enabled: true, models: GEMINI_MODELS, defaultModel: def, fallbackModels: GEMINI_FALLBACK, allowCustomModel: false, keyPlaceholder: 'AIza…', keyPrefixes: ['AIza', 'AQ.'] };
 }
 
+/** Bản sao Gemini KHÔNG dựng sẵn (id riêng) — dùng cho key Gemini nhận được từ người khác, để không đụng key Gemini sẵn có của người nhận. */
+function geminiClone(id, label, cfg = {}, prev = null) {
+  const g = geminiProvider(cfg); const now = new Date().toISOString();
+  return { ...g, id, label: String(label || g.label).trim().slice(0, 60) || g.label, builtin: false, enabled: prev ? prev.enabled !== false : true, createdAt: (prev && prev.createdAt) || now, updatedAt: now };
+}
+
 /** Chỉ cho gọi HTTPS tới tên miền công khai (người dùng nhập địa chỉ → không cho trỏ vào mạng nội bộ). */
 function validateBaseUrl(raw) {
   let u; try { u = new URL(String(raw || '').trim()); } catch { return { error: 'Địa chỉ API (baseUrl) không hợp lệ. Ví dụ: https://api.openai.com' }; }
@@ -69,6 +75,12 @@ function validateRegex(src) {
 
 /** Chuẩn hoá + kiểm tra một nhà cung cấp kiểu OpenAI do người dùng nhập. → { value } | { errors } */
 function normalizeProviderInput(raw, prev = null) {
+  if (prev && prev.kind === 'gemini' && !prev.builtin) {      // bản sao Gemini: chỉ cho đổi tên hiển thị + bật/tắt
+    const r0 = isPlain(raw) ? raw : {}; const label = String(r0.label == null ? prev.label : r0.label).trim();
+    if (!label || label.length > 60) return { errors: ['Tên hiển thị bắt buộc (tối đa 60 ký tự).'] };
+    const en = r0.enabled === undefined ? prev.enabled !== false : (r0.enabled === true || r0.enabled === 'true' || r0.enabled === 1);
+    return { value: geminiClone(prev.id, label, {}, { ...prev, enabled: en }), errors: [] };
+  }
   const errors = []; const r = isPlain(raw) ? raw : {}; const out = {};
   const id = prev ? prev.id : String(r.id || '').trim().toLowerCase();
   if (!prev) {
@@ -114,7 +126,8 @@ function sanitizeDocument(doc, cfg) {
   for (const raw of doc && Array.isArray(doc.providers) ? doc.providers : []) {
     if (!isPlain(raw)) continue; const id = String(raw.id || '').trim().toLowerCase();
     if (!id || seen.has(id) || id === 'gemini') continue;
-    const r = normalizeProviderInput(raw, { id, createdAt: raw.createdAt, enabled: raw.enabled !== false });
+    const r = normalizeProviderInput(raw, { id, createdAt: raw.createdAt, enabled: raw.enabled !== false, ...(raw.kind === 'gemini' ? { kind: 'gemini', label: raw.label } : {}) });
+    if (r.value && raw.kind === 'gemini') r.value.models = geminiProvider(cfg).models;
     if (!r.value) continue; r.value.updatedAt = raw.updatedAt || r.value.updatedAt; seen.add(id); out.providers.push(r.value);
   }
   return out;
@@ -137,4 +150,4 @@ function safeModel(p, model) {
 const publicProvider = (p) => ({ id: p.id, label: p.label, kind: p.kind, builtin: !!p.builtin, enabled: p.enabled !== false, baseUrl: p.baseUrl || '', chatPath: p.chatPath || '', authHeader: p.authHeader || '', authScheme: p.authScheme === undefined ? '' : p.authScheme, maxTokens: p.maxTokens || 0, models: p.models, defaultModel: p.defaultModel, allowCustomModel: !!p.allowCustomModel, keyPlaceholder: p.keyPlaceholder || '', subscribeRegex: p.subscribeRegex || '', systemPrompt: p.systemPrompt || '' });
 const publicPresets = () => PRESETS.map((x) => ({ id: x.id, label: x.label, baseUrl: x.baseUrl, chatPath: x.chatPath, models: x.models, defaultModel: x.defaultModel, keyPlaceholder: x.keyPlaceholder || '', subscribeRegex: x.subscribeRegex || '' }));
 
-module.exports = { GEMINI_MODELS, PRESETS, MAX_PROVIDERS, DEFAULT_SYSTEM_PROMPT, geminiProvider, normalizeProviderInput, sanitizeDocument, findProvider, safeModel, isValidModel, isValidModelName, validateBaseUrl, publicProvider, publicPresets };
+module.exports = { geminiClone, GEMINI_MODELS, PRESETS, MAX_PROVIDERS, DEFAULT_SYSTEM_PROMPT, geminiProvider, normalizeProviderInput, sanitizeDocument, findProvider, safeModel, isValidModel, isValidModelName, validateBaseUrl, publicProvider, publicPresets };

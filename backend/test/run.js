@@ -841,6 +841,16 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     // Dave dán key riêng → thành key của Dave (hết createdBy) và chia sẻ được
     assert.equal((await call('PUT', '/api/me/vault', { ...tk(D), body: { providers: { [ac.json.id]: { key: 'sk-dave-own-key-1' } } } })).status, 200);
     assert.equal((await call('POST', `/api/ai-key/${ac.json.id}/share`, { ...tk(D), body: { enabled: true } })).status, 200);
+    // Gemini: người nhận ĐÃ có key Gemini riêng vẫn nhận được (thành mục Gemini riêng, key cũ giữ nguyên)
+    await call('PUT', '/api/me/vault', { ...tk(C), body: { providers: { gemini: { key: 'AIza-owner-key-1' } } } });
+    await call('PUT', '/api/me/vault', { ...tk(D), body: { providers: { gemini: { key: 'AIza-guest-own-1' } } } });
+    assert.equal((await call('POST', '/api/ai-key/gemini/share', { ...tk(C), body: { enabled: true } })).status, 200);
+    const pg = await call('GET', `/api/ai-key/gemini?id=${C.user.id}`, tk(D)); assert.equal(pg.status, 200); assert.equal(pg.json.blocked, null);
+    const ag = await call('POST', '/api/ai-key/gemini/accept', { ...tk(D), body: { ownerId: C.user.id } }); assert.equal(ag.status, 201, JSON.stringify(ag.json)); assert.notEqual(ag.json.id, 'gemini'); assert.equal(ag.json.createdBy, C.user.id);
+    const dl = (await call('GET', '/api/ai/providers', tk(D))).json.providers; const gp = dl.find((x) => x.id === ag.json.id); assert.equal(gp.kind, 'gemini'); assert.equal(gp.createdBy, C.user.id);
+    const dv2 = (await call('GET', '/api/me/vault', tk(D))).json.vault; assert.equal(dv2.items.gemini.keySet, true); assert.equal(dv2.items.gemini.createdBy, null); assert.equal(dv2.items[ag.json.id].keySet, true);
+    assert.equal((await call('POST', `/api/ai-key/${ag.json.id}/share`, { ...tk(D), body: { enabled: true } })).status, 403);
+    const n1 = aiCalls.length; await call('POST', '/api/ai/test', { ...tk(D), body: { provider: ag.json.id } }); assert.ok(aiCalls[n1] && aiCalls[n1].url.includes('generativelanguage') && JSON.stringify(aiCalls[n1].headers).includes('AIza-owner-key-1') || String(aiCalls[n1].url).includes('AIza-owner-key-1'));
     // Xoá nhà cung cấp dọn dấu chia sẻ
     assert.equal((await call('DELETE', '/api/ai/providers/deepseek', tk(C))).status, 200);
   });

@@ -43,5 +43,5 @@ Khi cần một màn hình có sẵn ở bản cũ (`views/*.pug`, `public/js/*.
   - Chủ key bật chia sẻ ở Cài đặt → Nhà cung cấp AI (`POST /api/ai-key/:kid/share`). Mặc định TẮT.
   - Người nhận mở link (phải đăng nhập) → xem trước (`GET /api/ai-key/:kid?id=`, không lộ key) → `POST /api/ai-key/:kid/accept`: nhà cung cấp + key được sao chép, mã hoá lại bằng khoá của người nhận.
   - Bản nhận được đánh dấu `createdBy: "<id-user>"` (lưu trong `private/<uid>/vault.json` → `createdBy[<id>]`, hiện ra ở `/api/ai/providers` và `/api/me/vault`). Key có `createdBy` **không chia sẻ lại được** (403 `NO_RESHARE`) và không sửa được địa chỉ API (tránh chuyển key ra ngoài). Nếu người nhận dán API key riêng vào thì dấu `createdBy` được gỡ (key đó là của họ).
-  - Tắt chia sẻ chỉ chặn người nhận MỚI; bản đã sao chép không bị thu hồi. Gemini (dựng sẵn) chỉ nhận được khi người nhận chưa có key Gemini riêng.
+  - Tắt chia sẻ chỉ chặn người nhận MỚI; bản đã sao chép không bị thu hồi. Key Gemini nhận về luôn thành một mục Gemini riêng (id `gemini-xxxxx`, `kind:'gemini'`) — không đè key Gemini sẵn có của người nhận.
   - Test: `backend/test/run.js` → "chia sẻ AI key…".
