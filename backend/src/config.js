@@ -32,6 +32,7 @@ function config(env = process.env) {
     allowLocalhost: bool(env.ALLOW_LOCALHOST, false),
     accessTokenSec: Math.round(num(env.ACCESS_TOKEN_MINUTES, 60) * 60),
     refreshTokenSec: Math.round(num(env.REFRESH_TOKEN_DAYS, 30) * 86400),
+    sessionIdleSec: Math.round(num(env.SESSION_IDLE_DAYS, 5) * 86400),   // phiên không hoạt động (không đăng nhập/làm mới token) quá ngần này ngày → tự xoá
     bcryptRounds: Math.min(14, Math.max(8, num(env.BCRYPT_ROUNDS, 10))),
     registrationOpen: bool(env.REGISTRATION_OPEN, true),
     inviteCode: env.INVITE_CODE || '',

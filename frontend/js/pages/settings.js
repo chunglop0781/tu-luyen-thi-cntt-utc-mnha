@@ -22,6 +22,28 @@ export async function settingsPage(ctx) {
   }));
   const reidx = h('button', { class: 'btn' }, '🔧 Dựng lại chỉ mục');
   reidx.addEventListener('click', action(reidx, async () => { await post('/api/reindex', {}, { timeout: 60000 }); toast('Đã dựng lại chỉ mục', 'ok'); }));
+  // ── Danh sách phiên: xoá từng phiên (hoặc xoá hết ở nút bên dưới) ──
+  const sessTitle = h('h3', null);
+  const sessList = h('div', { class: 'stack' });
+  const renderCount = () => { sessTitle.textContent = `Phiên đăng nhập (${sessList.children.length})`; };
+  const sessRow = (x) => {
+    const btn = h('button', { class: 'btn ghost danger', type: 'button', title: x.current ? 'Xoá phiên này (bạn sẽ bị đăng xuất)' : 'Xoá phiên này' }, '🗑 Xoá');
+    const row = h('div', { class: 'row', style: 'justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap' },
+      h('p', { class: 'muted', style: 'margin:0;min-width:0;flex:1 1 240px;word-break:break-word' },
+        `${x.current ? '● Thiết bị này · ' : ''}${fmtDate(x.createdAt)} · ${String(x.ua || '').slice(0, 60)}`,
+        ...(x.lastSeen ? [h('br'), h('small', null, `Hoạt động gần nhất: ${fmtDate(x.lastSeen)}`)] : [])),
+      btn);
+    btn.addEventListener('click', action(btn, async () => {
+      const msg = x.current ? 'Xoá phiên của THIẾT BỊ NÀY? Bạn sẽ bị đăng xuất.' : 'Xoá phiên đăng nhập này? Thiết bị đó sẽ bị đăng xuất.';
+      if (!(await confirmBox(msg))) return;
+      const r = await del(`/api/me/sessions/${x.id}`);
+      if (r && r.current) { await logout(); ctx.go('/login'); return; }
+      row.remove(); renderCount(); toast('Đã xoá phiên', 'ok');
+    }));
+    return row;
+  };
+  sessions.forEach((x) => sessList.append(sessRow(x)));
+  renderCount();
   const all = h('button', { class: 'btn ghost danger' }, 'Đăng xuất mọi thiết bị');
   all.addEventListener('click', action(all, async () => { if (!(await confirmBox('Đăng xuất khỏi mọi thiết bị?'))) return; await post('/api/auth/logout-all', {}); await logout(); ctx.go('/login'); }));
   const diag = h('pre', { class: 'diag' }, 'Chưa kiểm tra');
@@ -34,7 +56,7 @@ export async function settingsPage(ctx) {
   return h('div', { class: 'stack' }, h('h2', null, 'Cài đặt'), tabs('account'),
     h('div', { class: 'card stack' }, h('h3', null, 'Hồ sơ'), h('p', { class: 'muted' }, `Tên đăng nhập: ${s.user.username}`), h('div', { class: 'row' }, name, nameBtn)),
     h('div', { class: 'card stack' }, h('h3', null, 'Đổi mật khẩu'), withToggle(oldPw), withToggle(newPw), pwBtn),
-    h('div', { class: 'card stack' }, h('h3', null, `Phiên đăng nhập (${sessions.length})`), ...sessions.map((x) => h('p', { class: 'muted' }, `${x.current ? '● Thiết bị này · ' : ''}${fmtDate(x.createdAt)} · ${x.ua.slice(0, 60)}`)), all),
+    h('div', { class: 'card stack' }, sessTitle, h('p', { class: 'muted' }, 'Phiên nào 5 ngày liên tiếp không đăng nhập lại sẽ tự động bị xoá.'), sessList, all),
     h('div', { class: 'card stack' }, h('h3', null, 'Dữ liệu'), h('div', { class: 'row' }, exp, reidx)),
     h('div', { class: 'card stack' }, h('h3', null, 'Kết nối'), h('p', { class: 'muted' }, `Backend: ${API}`), diagBtn, diag));
 }

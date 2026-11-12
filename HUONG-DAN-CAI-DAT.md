@@ -102,6 +102,7 @@ Cùng một danh sách biến được dùng ở 3 nơi, tuỳ cách bạn chọ
 | `IMAGE_REPO_LIMIT_MB` / `IMAGE_REPO_RESERVE_MB` | `200` / `8` | Chuyển sang repo ảnh mới khi đạt khoảng 192MB |
 | `ACCESS_TOKEN_MINUTES` | `60` | Thời hạn access token |
 | `REFRESH_TOKEN_DAYS` | `30` | Thời hạn refresh token |
+| `SESSION_IDLE_DAYS` | `5` | Phiên đăng nhập không hoạt động quá ngần ngày thì tự xoá (phải đăng nhập lại) |
 | `BCRYPT_ROUNDS` | `10` | Độ nặng băm mật khẩu (8–14) |
 | `REGISTRATION_OPEN` | `true` | Đặt `false` để đóng đăng ký (đăng ký xong hết người cần rồi đóng lại) |
 | `INVITE_CODE` | (trống) | Đặt một mã nếu muốn ai đăng ký cũng phải nhập mã mời |

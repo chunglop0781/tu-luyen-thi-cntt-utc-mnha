@@ -118,6 +118,7 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   router.get('/api/me', async (ctx) => ({ ok: true, user: await auth.me(authed(ctx)) }));
   router.patch('/api/me', async (ctx) => ({ ok: true, user: await auth.updateProfile(authed(ctx), ctx.body) }));
   router.get('/api/me/sessions', async (ctx) => ({ ok: true, sessions: await auth.sessions(await authedLive(ctx)) }));
+  router.delete('/api/me/sessions/:id', async (ctx) => ({ ok: true, ...(await auth.revokeOne(await authedLive(ctx), ctx.params.id)) }));   // xoá từng phiên
   router.get('/api/me/vault', async (ctx) => ({ ok: true, vault: await content.readVault(authed(ctx).sub) }));
   router.put('/api/me/vault', async (ctx) => ({ ok: true, vault: await content.writeVault((await authedLive(ctx)).sub, ctx.body) }));
 

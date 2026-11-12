@@ -11,6 +11,9 @@ const USERNAME_RE = /^[a-z0-9][a-z0-9_.-]{2,31}$/;
 const userPath = (key) => `users/${key}.json`;
 const sessionPath = (uid) => `sessions/${uid}.json`;
 const MAX_SESSIONS = 20;
+const TOUCH_SEC = 3600;                    // chỉ ghi lại "hoạt động gần nhất" nếu đã cũ hơn 1 giờ (đỡ tốn commit GitHub)
+const sessionId = (sid) => sha256Hex(sid).slice(0, 8);
+const lastSeenOf = (s) => Number(s.lastSeen) || Math.floor(Date.parse(s.createdAt) / 1000) || 0;   // phiên cũ chưa có lastSeen → lấy ngày tạo
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]{2,}$/;
 const emailKey = (email) => sha256Hex(email).slice(0, 40);
 const emailPath = (email) => `emails/${emailKey(email)}.json`;          // chỉ mục email → tài khoản (đảm bảo email duy nhất)
@@ -20,6 +23,9 @@ const maskEmail = (e) => { const [a, d] = String(e).split('@'); return `${a.slic
 function createAuth({ cfg, store, mailer }) {
   // Băm giả để thời gian phản hồi khi "không có user" ≈ khi "sai mật khẩu".
   const dummyHash = bcrypt.hashSync('dummy-password-for-timing', cfg.bcryptRounds);
+
+  /** Phiên còn sống: chưa hết hạn refresh token VÀ chưa quá cfg.sessionIdleSec không hoạt động. */
+  const alive = (s, now = Math.floor(Date.now() / 1000)) => s.exp > now && now - lastSeenOf(s) <= cfg.sessionIdleSec;
 
   const publicUser = (u) => ({ id: u.id, username: u.username, displayName: u.displayName, createdAt: u.createdAt, ...(u.email ? { email: u.email } : {}) });  // email của CHÍNH chủ tài khoản (hiện ở thanh trên cùng)
 
@@ -33,8 +39,8 @@ function createAuth({ cfg, store, mailer }) {
     const refreshExp = Math.floor(Date.now() / 1000) + cfg.refreshTokenSec;
     await store.update('account', sessionPath(user.id), (cur) => {
       const now = Math.floor(Date.now() / 1000);
-      const list = ((cur && cur.sessions) || []).filter((s) => s.exp > now);
-      list.push({ sid, exp: refreshExp, ua: clampStr(ua, 160), createdAt: nowIso() });
+      const list = ((cur && cur.sessions) || []).filter((s) => alive(s, now));
+      list.push({ sid, exp: refreshExp, ua: clampStr(ua, 160), createdAt: nowIso(), lastSeen: now });
       return { sessions: list.slice(-MAX_SESSIONS) };
     }, { message: `session ${user.id}`, defaultValue: { sessions: [] } });
     return tokens(user, sid);
@@ -183,7 +189,14 @@ function createAuth({ cfg, store, mailer }) {
     const p = jwtVerify(refreshToken, cfg.jwtSecret);
     if (!p || p.typ !== 'refresh') throw new HttpError(401, 'Phiên đăng nhập hết hạn', 'BAD_REFRESH');
     const s = await store.read('account', sessionPath(p.sub), { fresh: true });
-    if (!s || !s.data.sessions.some((x) => x.sid === p.sid && x.exp > Date.now() / 1000)) throw new HttpError(401, 'Phiên đã bị thu hồi', 'SESSION_REVOKED');
+    const cur = s && s.data.sessions.find((x) => x.sid === p.sid);
+    const now = Math.floor(Date.now() / 1000);
+    if (!cur || !alive(cur, now)) throw new HttpError(401, cur ? 'Phiên đã hết hạn do lâu không đăng nhập lại' : 'Phiên đã bị thu hồi', cur ? 'SESSION_EXPIRED' : 'SESSION_REVOKED');
+    if (now - lastSeenOf(cur) >= TOUCH_SEC) {            // ghi nhận hoạt động + dọn luôn các phiên đã quá hạn
+      try {
+        await store.update('account', sessionPath(p.sub), (c) => (c ? { sessions: c.sessions.filter((x) => alive(x, now)).map((x) => (x.sid === p.sid ? { ...x, lastSeen: now } : x)) } : undefined), { message: `touch ${p.sub}` });
+      } catch { /* không ghi được thì thôi, không chặn việc làm mới token */ }
+    }
     const u = await store.read('account', userPath(p.un));
     if (!u || u.data.id !== p.sub) throw new HttpError(401, 'Tài khoản không còn tồn tại', 'NO_USER');
     return tokens(u.data, p.sid);
@@ -194,6 +207,19 @@ function createAuth({ cfg, store, mailer }) {
       if (!cur) return undefined;
       return { sessions: cur.sessions.filter((s) => s.sid === keepSid) };
     }, { message: `revoke ${uid}` });
+  }
+
+  /** Xoá MỘT phiên theo id (8 ký tự hash của sid, lấy từ danh sách phiên). Trả { removed, current } — current=true nếu xoá chính phiên đang dùng. */
+  async function revokeOne(auth, id) {
+    if (!/^[a-f0-9]{8}$/.test(String(id))) throw new HttpError(400, 'Mã phiên không hợp lệ', 'VALIDATION');
+    let removed = null;
+    await store.update('account', sessionPath(auth.sub), (cur) => {
+      const list = (cur && cur.sessions) || [];
+      removed = list.find((x) => sessionId(x.sid) === id) || null;
+      return removed ? { sessions: list.filter((x) => x !== removed) } : undefined;
+    }, { message: `revoke-one ${auth.sub}` });
+    if (!removed) throw new HttpError(404, 'Không tìm thấy phiên này (có thể đã bị xoá)', 'NOT_FOUND');
+    return { removed: true, current: removed.sid === auth.sid };
   }
 
   async function logout(refreshToken) {
@@ -225,8 +251,12 @@ function createAuth({ cfg, store, mailer }) {
   }
 
   async function sessions(auth) {
-    const s = await store.read('account', sessionPath(auth.sub));
-    return ((s && s.data.sessions) || []).map((x) => ({ id: sha256Hex(x.sid).slice(0, 8), current: x.sid === auth.sid, ua: x.ua, createdAt: x.createdAt, exp: x.exp }));
+    const s = await store.read('account', sessionPath(auth.sub), { fresh: true });
+    const now = Math.floor(Date.now() / 1000), all = (s && s.data.sessions) || [], live = all.filter((x) => alive(x, now));
+    if (live.length !== all.length) {                    // có phiên quá hạn không hoạt động → xoá thật khỏi kho (best-effort)
+      try { await store.update('account', sessionPath(auth.sub), (c) => (c ? { sessions: c.sessions.filter((x) => alive(x, now)) } : undefined), { message: `prune idle ${auth.sub}` }); } catch { /* lượt sau sẽ dọn */ }
+    }
+    return live.map((x) => ({ id: sessionId(x.sid), current: x.sid === auth.sid, ua: x.ua, createdAt: x.createdAt, lastSeen: lastSeenOf(x) * 1000 || undefined, exp: x.exp }));
   }
 
   /** Xác thực access token → { sub, un, sid } hoặc ném 401. Chỉ kiểm tra chữ ký + hạn (không tra phiên). */
@@ -243,11 +273,11 @@ function createAuth({ cfg, store, mailer }) {
     const p = authenticate(req);
     const s = await store.read('account', sessionPath(p.sub), { fresh: true });
     const now = Math.floor(Date.now() / 1000);
-    if (!s || !((s.data && s.data.sessions) || []).some((x) => x.sid === p.sid && x.exp > now)) throw new HttpError(401, 'Phiên đã bị thu hồi, hãy đăng nhập lại', 'SESSION_REVOKED');
+    if (!s || !((s.data && s.data.sessions) || []).some((x) => x.sid === p.sid && alive(x, now))) throw new HttpError(401, 'Phiên đã bị thu hồi, hãy đăng nhập lại', 'SESSION_REVOKED');
     return p;
   }
 
-  return { register, registerStart, registerVerify, resetStart, resetConfirm, login, refresh, logout, revoke, changePassword, updateProfile, me, sessions, authenticate, authenticateLive };
+  return { register, registerStart, registerVerify, resetStart, resetConfirm, login, refresh, logout, revoke, revokeOne, changePassword, updateProfile, me, sessions, authenticate, authenticateLive };
 }
 
 module.exports = { createAuth, USERNAME_RE };

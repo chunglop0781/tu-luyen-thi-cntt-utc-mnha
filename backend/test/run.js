@@ -892,6 +892,43 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.equal((await put(Y.accessToken)).status, 401);
     assert.equal((await call('POST', '/api/auth/logout-all', { token: Y.accessToken })).status, 401);   // token đã thu hồi không dùng lại được
   });
+  await t('xoá TỪNG phiên: xoá phiên khác thì phiên mình còn, xoá phiên mình thì bị đăng xuất; id sai → 400, id lạ → 404', async () => {
+    const X = await reg('onesess'); const Y = (await call('POST', '/api/auth/login', { body: { username: 'onesess', password: 'matkhau123' } })).json;
+    const list = (tok) => call('GET', '/api/me/sessions', { token: tok });
+    const l1 = (await list(X.accessToken)).json.sessions; assert.equal(l1.length, 2);
+    const other = l1.find((x) => !x.current), mine = l1.find((x) => x.current);
+    assert.ok(other.lastSeen > 0);
+    assert.equal((await call('DELETE', '/api/me/sessions/zzzz', { token: X.accessToken })).status, 400);
+    assert.equal((await call('DELETE', '/api/me/sessions/00000000', { token: X.accessToken })).status, 404);
+    const r = await call('DELETE', `/api/me/sessions/${other.id}`, { token: X.accessToken });
+    assert.equal(r.status, 200); assert.equal(r.json.current, false);
+    assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken: Y.refreshToken } })).status, 401);   // phiên đã xoá không làm mới được
+    assert.equal((await list(X.accessToken)).json.sessions.length, 1);
+    const r2 = await call('DELETE', `/api/me/sessions/${mine.id}`, { token: X.accessToken });
+    assert.equal(r2.status, 200); assert.equal(r2.json.current, true);
+    assert.equal((await list(X.accessToken)).status, 401);
+  });
+  await t('phiên 5 ngày không hoạt động tự bị xoá; làm mới token (hoạt động) thì được gia hạn', async () => {
+    const X = await reg('idlesess'); const DAY = 86400e3; const real = Date.now;
+    try {
+      Date.now = () => real() + 4 * DAY;                                                   // 4 ngày: còn sống, làm mới token → tính là hoạt động
+      assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken: X.refreshToken } })).status, 200);
+      Date.now = () => real() + 8 * DAY;                                                   // 4 ngày sau lần hoạt động trước: vẫn sống
+      assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken: X.refreshToken } })).status, 200);
+      Date.now = () => real() + 14 * DAY;                                                  // 6 ngày im lặng → hết hạn
+      const r = await call('POST', '/api/auth/refresh', { body: { refreshToken: X.refreshToken } });
+      assert.equal(r.status, 401); assert.equal(r.json.code, 'SESSION_EXPIRED');
+    } finally { Date.now = real; }
+  });
+  await t('phiên quá 5 ngày không hoạt động bị dọn khỏi danh sách và khi đăng nhập mới', async () => {
+    const X = await reg('idleclean'); const DAY = 86400e3; const real = Date.now;
+    try {
+      Date.now = () => real() + 6 * DAY;
+      const Y = (await call('POST', '/api/auth/login', { body: { username: 'idleclean', password: 'matkhau123' } })).json;   // phiên cũ bị loại khi cấp phiên mới
+      const l = (await call('GET', '/api/me/sessions', { token: Y.accessToken })).json.sessions;
+      assert.equal(l.length, 1); assert.equal(l[0].current, true);
+    } finally { Date.now = real; }
+  });
   await t('token đã thu hồi cũng không chia sẻ / nhận / thử AI key được', async () => {
     const X = await reg('livekey'); const Y = (await call('POST', '/api/auth/login', { body: { username: 'livekey', password: 'matkhau123' } })).json;
     await call('POST', '/api/auth/logout', { body: { refreshToken: X.refreshToken } });
