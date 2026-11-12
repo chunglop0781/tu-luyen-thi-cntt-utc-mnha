@@ -1,0 +1,52 @@
+name: Dọn mã OTP (repo -account)
+# Workflow nằm ở repo chính, checkout repo -account bằng secret ACCOUNT_REPO_TOKEN rồi xoá otp/*.json quá 10 phút.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      max_age_minutes:
+        description: 'Xoá mã OTP cũ hơn N phút'
+        default: '10'
+permissions:
+  contents: read
+concurrency:
+  group: cleanup-otp
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/checkout@v4
+        with:
+          # Chủ repo -account: đặt biến repo ACCOUNT_OWNER nếu khác chủ repo này
+          repository: ${{ vars.ACCOUNT_OWNER || github.repository_owner }}/${{ vars.ACCOUNT_REPO || 'tu-luyen-thi-cntt-utc-mnha-account' }}
+          token: ${{ secrets.ACCOUNT_REPO_TOKEN }}
+          path: account
+          sparse-checkout: otp
+      - name: Xoá OTP quá hạn
+        env:
+          OTP_MAX_AGE_MIN: ${{ github.event.inputs.max_age_minutes || '10' }}
+        run: node .github/scripts/cleanup-otp.js account/otp
+      - name: Commit & push (nếu có file bị xoá)
+        working-directory: account
+        run: |
+          if [ -z "$(git status --porcelain -- otp)" ]; then echo "Không có OTP nào cần dọn."; exit 0; fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A otp
+          git commit -m "chore: dọn OTP hết hạn"
+          for i in 1 2 3 4 5; do
+            if git push; then exit 0; fi
+            echo "Push bị từ chối (backend vừa ghi commit mới) — thử lại lần $i"
+            git pull --rebase --autostash
+            node ../.github/scripts/cleanup-otp.js otp
+            git add -A otp
+            git diff --cached --quiet || git commit -m "chore: dọn OTP hết hạn"
+            sleep $((i * 3))
+          done
+          echo "Không push được sau 5 lần, lượt sau sẽ dọn tiếp."
