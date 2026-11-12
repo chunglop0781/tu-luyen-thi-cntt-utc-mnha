@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # Chủ repo -account: đặt biến repo ACCOUNT_OWNER nếu khác chủ repo này
-          repository: ${{ vars.ACCOUNT_OWNER || github.repository_owner }}/${{ vars.ACCOUNT_REPO || 'tu-luyen-thi-cntt-utc-mnha-account' }}
+          repository: ${{ secrets.ACCOUNT_OWNER || vars.ACCOUNT_OWNER || github.repository_owner }}/${{ secrets.ACCOUNT_REPO || vars.ACCOUNT_REPO || 'tu-luyen-thi-cntt-utc-mnha-account' }}
           token: ${{ secrets.ACCOUNT_REPO_TOKEN }}
           path: account
           sparse-checkout: otp
