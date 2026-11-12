@@ -106,7 +106,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   }
 
   // ───────── Bài nộp ─────────
-  async function submit(uid, id, input) {
+  async function submit(uid, id, input, nameFn) {
     mustId(id);
     const type = mustType(input.itemType), itemId = mustId(input.itemId);
     const dup = await store.read('data', subPath(uid, id), { fresh: true });
@@ -144,7 +144,25 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
       if (it) { it.attempts = (it.attempts || 0) + 1; it.lastAt = sub.submittedAt; if (pct != null && (it.bestPct == null || pct > it.bestPct)) it.bestPct = pct; }
       return idx;
     }, { message: `index ${uid}`, defaultValue: emptyIndex() });
-    return sub;
+    return joinOwnShare(uid, sub, nameFn);      // bài đã chia sẻ → bài nộp của chủ bài cũng hiện ở lịch sử chia sẻ (và không xoá được)
+  }
+
+  /** Chủ bài làm thử CHÍNH bài của mình (không qua link): nếu bài đã chia sẻ thì bài nộp vào lịch sử chia sẻ như mọi người và bị khoá xoá.
+   *  nameFn: hàm async trả tên hiển thị. since: chỉ tính các bài nộp từ lúc bật chia sẻ (luyện riêng trước đó không đưa vào lịch sử). */
+  async function joinOwnShare(uid, sub, nameFn, { force = false } = {}) {
+    if (!sub || sub.shareId || !isId(sub.itemId) || (sub.inShare && !force)) return sub;
+    const sid = sub.inShare || await shareIdOf(uid, sub.itemId).catch(() => null);
+    if (!sid || !isId(sid)) return sub;
+    if (!sub.inShare) {
+      const r = await store.read('data', sharePath(sid)).catch(() => null);
+      if (!r || r.data.ownerId !== uid || String(sub.submittedAt) < String(r.data.createdAt || '')) return sub;
+    }
+    let name = '';
+    try { name = String((nameFn && (await nameFn())) || '').slice(0, 60); } catch { name = ''; }
+    let cur = sub;
+    if (cur.inShare !== sid) cur = (await store.update('data', subPath(uid, sub.id), (x) => { if (!x) return undefined; x.inShare = sid; return x; }, { message: `in-share ${sub.id}` })) || { ...sub, inShare: sid };
+    await recordResult(sid, { id: sub.id, uid, n: name, at: cur.submittedAt, score: cur.score == null ? null : cur.score, max: cur.max });
+    return cur;
   }
 
   /** Chuẩn hoá đáp án gửi lên (chuyển từ bản cũ sanitizeAnswers): mcq = mảng khoá, tf = boolean theo từng ý, fill = chuỗi. */
@@ -200,6 +218,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
       return s;
     }, { message: `grade ${id}` });
     if (next.score != null) await patchIndexSub(uid, id, next.score, next.max);
+    if (next.inShare && next.score != null) await setResultScore(next.inShare, { id, uid, n: '', at: next.submittedAt, score: next.score, max: next.max }).catch(() => {});
     return next;
   }
 
@@ -253,7 +272,8 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     if (pr && !shared) ai.promptName = pr.name;      // bài chia sẻ: không lộ tên/nội dung prompt của chủ bài
     const next = await store.update('data', subPath(uid, id), (s) => { if (shared && s.ai) throw already(); s.ai = ai; if (s.selfScore == null) s.score = ai.score; return s; }, { message: `ai-grade ${id}` });
     if (next.score != null) await patchIndexSub(uid, id, next.score, next.max);
-    if (shared && next.score != null) await setResultScore(shared, { id, uid, n: String(wanted.studentName || '').slice(0, 60), at: next.submittedAt, score: next.score, max: next.max });
+    const sidOut = shared || (next.inShare && isId(next.inShare) ? next.inShare : null);   // bài qua link HOẶC bài của chủ bài đã vào lịch sử chia sẻ
+    if (sidOut && next.score != null) await setResultScore(sidOut, { id, uid, n: String(wanted.studentName || '').slice(0, 60), at: next.submittedAt, score: next.score, max: next.max });
     return next;
   }
 
@@ -279,8 +299,8 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
 
   async function deleteSubmission(uid, id) {
     const sub = await getSubmission(uid, id);
-    // Bài nộp qua link chia sẻ đã nằm trong biểu đồ chung → không cho xoá (như luyen-thi), để điểm không biến mất.
-    if (sub.shareId) throw new HttpError(403, 'Bài nộp từ link chia sẻ không xoá được — điểm đã nằm trong biểu đồ chung', 'SHARED_LOCKED');
+    // Bài đã nộp vào bài được chia sẻ (qua link, hoặc chủ bài tự làm) đã nằm trong lịch sử chung → không cho xoá.
+    if (sub.shareId || sub.inShare) throw new HttpError(403, 'Bài đã nộp vào bài được chia sẻ nên không xoá được — điểm đã nằm trong lịch sử chung', 'SHARED_LOCKED');
     await store.remove('data', subPath(uid, id), `delete sub ${id}`);
     await store.update('data', indexPath(uid), (idx) => { idx.subs = idx.subs.filter((s) => s.id !== id); return idx; }, { message: `index ${uid}`, defaultValue: emptyIndex() });
   }
@@ -448,26 +468,53 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return sub;
   }
 
-  /** Lịch sử + biểu đồ. Chủ bài: thấy tên từng người. Người làm: chỉ thấy bài + điểm của mình; điểm người khác ẩn danh. */
-  async function sharedHistory(uid, sid) {
-    const { doc, isOwner } = await loadShare(sid, uid);
+  /** Bài chủ bài đã nộp vào bài của mình (từ lúc bật chia sẻ) mà chưa có trong lịch sử → bù vào + khoá xoá. */
+  async function backfillOwner(uid, doc, nameFn) {
+    const idx = await getIndex(uid);
+    const have = new Set((doc.results || []).filter(Boolean).map((r) => r.id));
+    const missing = (idx.subs || []).filter((x) => x.itemId === doc.itemId && !x.shareId && !have.has(x.id) && String(x.at) >= String(doc.createdAt || '')).slice(0, 40);
+    let changed = false, name;
+    const lazy = async () => (name === undefined ? (name = await nameFn()) : name);
+    for (const m of missing) {
+      try { const sub = await getSubmission(uid, m.id); await joinOwnShare(uid, sub, lazy, { force: true }); changed = true; } catch { /* bài lỗi/đã mất: bỏ qua */ }
+    }
+    return changed;
+  }
+
+  /** Lịch sử + biểu đồ. Chủ bài: thấy TÊN + điểm + id từng bài nộp (mở được chi tiết, chỉ đọc) — như admin của luyen-thi.
+   *  Người làm: CHỈ thấy bài + điểm của chính mình (không thấy điểm / tên người khác, kể cả ẩn danh). */
+  async function sharedHistory(uid, sid, nameFn) {
+    let { doc, isOwner } = await loadShare(sid, uid);
+    if (isOwner && nameFn && await backfillOwner(uid, doc, nameFn).catch(() => false)) ({ doc, isOwner } = await loadShare(sid, uid));
     const allResults = (doc.results || []).filter(Boolean);
-    const results = allResults.filter((r) => r.score != null);     // chỉ lượt đã có điểm mới lên biểu đồ
-    const points = results.map((r) => {
+    const visible = allResults.filter((r) => isOwner || r.uid === uid);
+    const points = visible.filter((r) => r.score != null).map((r) => {
       const t = Date.parse(r.at); const max = Number(r.max) || 10, raw = Number(r.score);
-      const mine = r.uid === uid;
-      const pt = { t, s: round2(Math.max(0, Math.min(10, (raw / max) * 10))), raw, max, q: shareType(doc) === 'quiz' ? 1 : 0, m: mine ? 1 : 0 };
+      const pt = { t, s: round2(Math.max(0, Math.min(10, (raw / max) * 10))), raw, max, q: shareType(doc) === 'quiz' ? 1 : 0, m: r.uid === uid ? 1 : 0, id: r.id };
       if (isOwner) pt.n = r.n || '';
-      else if (mine) pt.id = r.id;
       return pt;
     }).filter((p) => !Number.isNaN(p.t)).sort((a, b) => a.t - b.t).slice(-5000);
-    const rows = allResults.filter((r) => isOwner || r.uid === uid).map((r) => ({ id: isOwner ? undefined : r.id, n: isOwner ? r.n : undefined, at: r.at, score: r.score == null ? null : r.score, max: r.max })).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const rows = visible.map((r) => ({ id: r.id, m: r.uid === uid ? 1 : 0, n: isOwner ? r.n : undefined, at: r.at, score: r.score == null ? null : r.score, max: r.max })).sort((a, b) => String(b.at).localeCompare(String(a.at)));
     const scored = rows.filter((r) => r.score != null).map((r) => (r.max ? (r.score / r.max) * 10 : 0));
     return {
       share: { id: sid, itemId: doc.itemId, type: shareType(doc), title: doc.title, subject: doc.subject, isOwner, enabled: doc.enabled !== false },
       stats: { total: rows.length, pending: rows.filter((r) => r.score == null).length, students: isOwner ? new Set(allResults.map((r) => r.uid)).size : undefined, best: scored.length ? round2(Math.max(...scored)) : null },
       points, rows: rows.slice(0, 300),
     };
+  }
+
+  /** Chủ bài mở chi tiết một bài nộp của người làm (CHỈ ĐỌC) — như admin xem /submissions/<id> ở luyen-thi.
+   *  Không lộ ghi chú riêng, điểm tự chấm, tên prompt / nhà cung cấp AI của người làm. */
+  async function sharedSubmission(uid, sid, id) {
+    mustId(id);
+    const { doc } = await loadShare(sid, uid, { ownerOnly: true, needEnabled: false });
+    const r = (doc.results || []).find((x) => x && x.id === id);
+    if (!r || !isId(r.uid)) throw new HttpError(404, 'Không tìm thấy bài nộp', 'NOT_FOUND');
+    const sub = await getSubmission(r.uid, id);
+    if (sub.shareId !== sid && sub.inShare !== sid) throw new HttpError(404, 'Không tìm thấy bài nộp', 'NOT_FOUND');
+    const { ai, aiAnalyses, note, selfScore, suggestion, ownerId, ...rest } = sub;
+    const aiPub = ai ? { score: ai.score, feedback: ai.feedback, strengths: ai.strengths || [], weaknesses: ai.weaknesses || [], model: ai.model, keyName: ai.keyName || '', at: ai.at } : null;
+    return { submission: { ...rest, ai: aiPub, readOnly: true }, student: r.n || '', mine: r.uid === uid };
   }
 
   // ───────── Kho riêng tư (repo ACCOUNT) ─────────
@@ -687,7 +734,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { exportedAt: nowIso(), items: items.filter(Boolean), submissions: subs.filter(Boolean), prompts: await prompts.list(uid).catch(() => []) };
   }
 
-  return { setKeyShare, previewKeyShare, acceptKeyShare, prompts, overview, shareIdOf, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, resolveShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
+  return { setKeyShare, previewKeyShare, acceptKeyShare, prompts, overview, shareIdOf, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, resolveShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory, sharedSubmission, joinOwnShare };
 }
 
 module.exports = { createContent };

@@ -6,7 +6,7 @@ import { homePage, historyPage } from './pages/home.js';
 import { essayEditor } from './pages/editors.js';
 import { essayPractice } from './pages/practice.js';
 import { quizEditorPage, quizPracticePage } from './pages/quiz.js';
-import { submissionPage } from './pages/submission.js';
+import { submissionPage, sharedSubmissionPage } from './pages/submission.js';
 import { settingsPage, aiSettingsPage } from './pages/settings.js';
 import { promptsPage, promptEditorPage } from './pages/prompts.js';
 import { itemHistoryPage } from './pages/itemHistory.js';
@@ -40,6 +40,7 @@ const routes = [
   [/^\/s\/([a-f0-9_]+)$/, (c, m) => sharePage(c, m[1])],
   [/^\/s\/([a-f0-9_]+)\/play$/, (c, m) => sharePlayPage(c, m[1])],
   [/^\/s\/([a-f0-9_]+)\/history$/, (c, m) => shareHistoryPage(c, m[1])],
+  [/^\/s\/([a-f0-9_]+)\/submission\/([a-f0-9_]+)$/, (c, m) => sharedSubmissionPage(c, m[1], m[2])],   // chủ bài xem chi tiết bài nộp của người làm
   [/^\/lessons\/([a-f0-9_]+)\/(share|history|play)$/, lessonLinkPage],
   [/^\/ai-key\/([a-z][a-z0-9_-]{1,31})$/, aiKeyLinkPage],     // link chia sẻ AI key: #/ai-key/<id-ai-key>?id=<id-user>
 ];

@@ -1,5 +1,5 @@
 'use strict';
-// E2E chia sẻ bài (trình duyệt thật): mở link khi chưa đăng nhập → bắt đăng nhập → quay lại đúng bài → làm → biểu đồ; chủ bài thấy tên, người làm ẩn danh.
+// E2E chia sẻ bài (trình duyệt thật): mở link khi chưa đăng nhập → bắt đăng nhập → quay lại đúng bài → làm → biểu đồ; chủ bài thấy tên + mở được bài của người làm, người làm chỉ thấy điểm của mình.
 // Chạy: NODE_PATH=test/stubs/node_modules:/opt/npm-tools/node_modules node test/e2e-share.js
 const http = require('http'), fs = require('fs'), path = require('path');
 const { chromium } = require('playwright');
@@ -41,7 +41,7 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     ok(true, 'mở link khi chưa đăng nhập → bị chuyển sang trang đăng nhập');
     await login(bob, 'bob'); await bob.waitForSelector('.share-landing h2');
     ok((await bob.textContent('.share-landing h2')).includes('Mạng cơ bản'), 'đăng nhập xong → quay lại đúng bài được chia sẻ');
-    ok((await bob.content()).includes('Chủ bài chỉ biết bạn đã nộp') , 'thông báo quyền riêng tư cho người làm');
+    ok((await bob.content()).includes('người làm khác thì không thấy gì của bạn') , 'thông báo quyền riêng tư cho người làm');
     await bob.click('text=▶ Làm bài'); await bob.waitForSelector('#qxStartBtn'); await bob.click('#qxStartBtn');
     await bob.waitForSelector('#questionContainer .option-letter'); await bob.locator('#questionContainer .option-letter').nth(1).click();
     await bob.$eval('#submitTop', (e) => e.click()); await bob.waitForSelector('#resultSection:not(.hidden)', { timeout: 15000 });
@@ -49,42 +49,52 @@ const ok = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('  ✓
     await bob.goto(WEB + `#/s/${sid}/history`); await bob.waitForSelector('.hc svg circle');
     ok((await bob.$$('.hc svg circle')).length === 1, 'biểu đồ có điểm của bob');
     ok(!(await bob.content()).includes('carol') && !(await bob.content()).includes('alice'), 'bob không thấy tên người khác');
-    ok(await bob.isVisible('a:has-text("Xem bài làm")'), 'bob có nút xem bài làm của mình');
-    await bob.click('a:has-text("Xem bài làm")'); await bob.waitForSelector('.bigscore'); ok(true, 'xem lại bài làm của mình');
+    ok(await bob.isVisible('a:has-text("Xem chi tiết")'), 'bob có nút xem bài làm của mình');
+    await bob.click('a:has-text("Xem chi tiết")'); await bob.waitForSelector('.bigscore'); ok(true, 'xem lại bài làm của mình');
     await bob.goto(WEB); await bob.waitForSelector('text=Bài được chia sẻ với tôi'); ok(true, 'trang chủ bob có mục "Bài được chia sẻ với tôi"');
 
     console.log('Người thứ hai (carol) nộp để biểu đồ có nhiều điểm');
     const carol = await newPage(); await carol.goto(WEB + `#/s/${sid}/play`); await carol.waitForSelector('.auth'); await login(carol, 'carol');
     await carol.waitForSelector('#qxStartBtn'); await carol.click('#qxStartBtn'); await carol.waitForSelector('#questionContainer .option-letter'); await carol.$eval('#submitTop', (e) => e.click()); await carol.waitForSelector('#resultSection:not(.hidden)', { timeout: 15000 });
     await carol.goto(WEB + `#/s/${sid}/history`); await carol.waitForSelector('.hc svg circle');
-    ok((await carol.$$('.hc svg circle')).length === 2, 'carol thấy 2 điểm (của mình + 1 điểm ẩn danh)');
-    await carol.locator('.hc svg circle').first().hover(); ok(/Bạn khác|Bài của bạn/.test(await carol.textContent('.hc-tip')) && !/BOB|bob/.test(await carol.textContent('.hc-tip')), 'tooltip ẩn danh, không lộ tên');
+    ok((await carol.$$('.hc svg circle')).length === 1, 'carol chỉ thấy 1 điểm (của mình), không còn điểm ẩn danh của bob');
+    await carol.locator('.hc svg circle').first().hover(); ok(/Bài của bạn/.test(await carol.textContent('.hc-tip')) && !/BOB|bob/.test(await carol.textContent('.hc-tip')), 'tooltip chỉ nói bài của bạn, không lộ tên');
 
     console.log('Chủ bài (alice)');
     const alice = await newPage(); await alice.goto(WEB); await alice.waitForSelector('.auth'); await login(alice, 'alice'); await alice.waitForSelector('text=Bài của tôi');
     await alice.waitForSelector('text=Đang chia sẻ'); ok(true, 'thẻ bài hiện "Đang chia sẻ"');
     await alice.click('.card.item:has-text("Mạng cơ bản") button:has-text("🔗 Chia sẻ")'); await alice.waitForSelector('.modal input');
-    ok((await alice.inputValue('.modal input')).endsWith(`#/s/${sid}`), 'hộp thoại chia sẻ hiện đúng link #/s/<id>'); await alice.keyboard.press('Escape');
+    ok((await alice.inputValue('.modal input')).endsWith(`#/lessons/${quizId}/share?id=${A.user.id}`), 'hộp thoại chia sẻ hiện đúng link #/lessons/<bài>/share?id=<chủ bài>'); await alice.keyboard.press('Escape');
     await alice.goto(WEB + `#/s/${sid}/history`); await alice.waitForSelector('.hc svg circle');
     ok((await alice.$$('.hc svg circle')).length === 2, 'chủ bài thấy 2 điểm');
     const names = await alice.$$eval('.tbl tbody tr td:first-child', (e) => e.map((x) => x.textContent).sort()); ok(names.join() === 'BOB,CAROL', 'bảng liệt kê tên từng người nộp: ' + names);
-    ok(!(await alice.isVisible('a:has-text("Xem bài làm")')), 'chủ bài không có nút xem bài làm của người khác');
+    ok(await alice.isVisible('.tbl a:has-text("Xem chi tiết")'), 'chủ bài có nút "Xem chi tiết" cho bài của từng người');
+    await alice.locator('.tbl tbody tr:has-text("BOB") a:has-text("Xem chi tiết")').click(); await alice.waitForSelector('.sd-page, .bigscore'); ok(/\/submission\//.test(alice.url()), 'chủ bài mở được chi tiết bài của BOB (chỉ đọc)');
+    ok(!(await alice.isVisible('button:has-text("Xoá bài nộp")')), 'trang chi tiết của chủ bài không có nút xoá');
     console.log('Chia sẻ bài tự luận (bob nộp, AI chấm bằng key của bob)');
     const eid = 'b1c2d3e4f5a60718';
     const e = await J('PUT', `/api/essays/${eid}`, { title: 'Mô hình OSI', subject: 'Mạng', prompt: 'Trình bày mô hình OSI', modelAnswer: 'DAP-AN-MAU-BI-MAT', maxScore: 10 }, A.accessToken); if (!e.ok) throw new Error(JSON.stringify(e));
     await alice.goto(WEB); await alice.waitForSelector('.card.item:has-text("Mô hình OSI")');
     await alice.click('.card.item:has-text("Mô hình OSI") button:has-text("🔗 Chia sẻ")'); await alice.waitForSelector('.modal input');
-    const elink = await alice.inputValue('.modal input'); const esid = elink.split('#/s/')[1]; ok(/^[a-f0-9]+$/.test(esid) && esid !== sid, 'bài tự luận có nút Chia sẻ và link riêng'); await alice.keyboard.press('Escape');
+    const elink = await alice.inputValue('.modal input'); const esid = (await J('POST', '/api/shares', { type: 'essay', itemId: eid }, A.accessToken)).shareId; ok(elink.includes(`/lessons/${eid}/share?id=${A.user.id}`) && /^[a-f0-9]+$/.test(esid) && esid !== sid, 'bài tự luận có nút Chia sẻ và link riêng'); await alice.keyboard.press('Escape');
     await bob.goto(WEB + `#/s/${esid}`); await bob.waitForSelector('.share-landing h2'); ok((await bob.content()).includes('Bài tự luận được chia sẻ'), 'bob mở link → trang đón bài tự luận');
     ok(!(await bob.content()).includes('DAP-AN-MAU-BI-MAT'), 'đề không lộ đáp án mẫu trước khi nộp');
-    await bob.goto(WEB + `#/s/${esid}/play`); await bob.waitForSelector('textarea'); await bob.fill('textarea', 'OSI có 7 tầng: vật lý, liên kết dữ liệu, mạng…'); await bob.click('button:has-text("Nộp bài")');
-    await bob.waitForSelector('.bigscore'); ok((await bob.textContent('.bigscore')).includes('Chờ chấm AI'), 'nộp tự luận: chưa tự chấm');
+    await J('PUT', '/api/me/vault', { geminiKey: 'AIza-bob-key-12345' }, B.accessToken);
+    await bob.goto(WEB + `#/s/${esid}/play`); await bob.waitForSelector('#aiCheckBtn'); await bob.click('#aiCheckBtn'); await bob.waitForSelector('#writingInput:not([disabled])', { timeout: 20000 }); await bob.fill('#writingInput', 'OSI có 7 tầng: vật lý, liên kết dữ liệu, mạng…'); await bob.click('#submitBtn');
+    await bob.waitForSelector('.sd-page .sd-score'); await bob.waitForFunction(() => /6/.test((document.querySelector('.sd-score .n') || {}).textContent || ''), null, { timeout: 20000 }); ok(true, 'nộp tự luận → AI tự chấm bằng key của bob → 6 điểm (trang chi tiết bản luyen-thi)');
     ok(!(await bob.isVisible('button:has-text("Xoá bài nộp")')), 'bài nộp từ link chia sẻ không có nút xoá');
-    await J('PUT', '/api/me/vault', { geminiKey: 'AIza-bob-key-12345' }, B.accessToken); await bob.reload(); await bob.waitForSelector('#aiGradeBtn');
-    await bob.click('#aiGradeBtn'); await bob.waitForFunction(() => /6\/10/.test(document.querySelector('.bigscore').textContent), null, { timeout: 15000 }); ok(true, 'AI chấm xong bằng key của bob → 6/10');
+    await bob.reload(); await bob.waitForSelector('.sd-page .sd-score');
     ok(!(await bob.isVisible('#aiGradeBtn')), 'không chấm lại được');
     await bob.goto(WEB + `#/s/${esid}/history`); await bob.waitForSelector('.hc svg circle'); ok((await bob.$$('.hc svg circle')).length === 1, 'điểm tự luận lên biểu đồ sau khi chấm');
-    await alice.goto(WEB + `#/s/${esid}/history`); await alice.waitForSelector('.hc svg circle'); ok((await alice.textContent('.tbl')).includes('BOB'), 'chủ bài thấy bob trong bảng, bài làm vẫn riêng tư');
+    await alice.goto(WEB + `#/s/${esid}/history`); await alice.waitForSelector('.hc svg circle'); ok((await alice.textContent('.tbl')).includes('BOB'), 'chủ bài thấy bob trong bảng');
+    await alice.locator('.tbl tbody tr:has-text("BOB") a:has-text("Xem chi tiết")').click(); await alice.waitForSelector('.sd-page .sd-h1');
+    const dt = await alice.textContent('.sd-page'); ok(dt.includes('BOB') && dt.includes('OSI có 7 tầng') && dt.includes('Đủ ý chính') && dt.includes('DAP-AN-MAU-BI-MAT'), 'chủ bài thấy tên, bài làm, nhận xét AI, lời giải mẫu của bob');
+    ok(!dt.includes('AIza-bob-key'), 'không lộ API key của bob');
+    if (process.env.SHOT) { await alice.setViewportSize({ width: 1100, height: 1500 }); await alice.screenshot({ path: process.env.SHOT + '/owner-light.png', fullPage: true }); await alice.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark')); await alice.screenshot({ path: process.env.SHOT + '/owner-dark.png', fullPage: true });
+      await bob.goto(WEB + `#/s/${esid}/history`); await bob.waitForSelector('.tbl'); await bob.click('.tbl a:has-text("Xem chi tiết")'); await bob.waitForSelector('.sd-page'); await bob.setViewportSize({ width: 1100, height: 1500 }); await bob.screenshot({ path: process.env.SHOT + '/student-light.png', fullPage: true }); }
+    await bob.goto(WEB + `#/s/${esid}/history`); await bob.waitForSelector('.tbl'); await bob.click('.tbl a:has-text("Xem chi tiết")'); await bob.waitForSelector('.sd-page');
+    ok(!(await bob.isVisible('button:has-text("Xoá bài nộp")')) && await bob.isVisible('text=Không xoá được'), 'bob: bài đã nộp không xoá được');
+    ok(!(await alice.textContent('.sd-page')).includes('Chấm bằng AI'), 'chủ bài xem bài người khác: không có khối chấm AI');
 
     ok(errors.length === 0, 'không có lỗi JS/console: ' + errors.join(' | '));
     console.log('\nE2E chia sẻ: OK');

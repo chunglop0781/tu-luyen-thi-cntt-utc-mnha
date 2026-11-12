@@ -426,15 +426,31 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.equal((await call('GET', `/api/submissions/${bSub}`, { token: A.accessToken })).status, 404);   // chủ bài không đọc được bài làm
     const ov = (await call('GET', '/api/overview', { token: B.accessToken })).json; assert.equal(ov.shared.length, 1); assert.equal(ov.shared[0].shareId, shareId); assert.equal(ov.items.length, 0);
   });
-  await t('lịch sử: chủ bài thấy tên từng người; người làm chỉ thấy bài + điểm của mình, điểm người khác ẩn danh', async () => {
+  await t('lịch sử: chủ bài thấy TÊN + id từng người; người làm chỉ thấy bài + điểm của CHÍNH MÌNH (không còn điểm ẩn danh của người khác)', async () => {
     const o = (await call('GET', `/api/shares/${shareId}/history`, { token: A.accessToken })).json;
     assert.equal(o.share.isOwner, true); assert.equal(o.stats.students, 2); assert.equal(o.points.length, 2);
-    assert.deepEqual(o.points.map((p) => p.n).sort(), ['BOB', 'CAROL']); assert.equal(o.rows.length, 2); assert.ok(o.rows.every((r) => r.n && !r.id));
+    assert.deepEqual(o.points.map((p) => p.n).sort(), ['BOB', 'CAROL']); assert.equal(o.rows.length, 2); assert.ok(o.rows.every((r) => r.n && r.id));
     const b = (await call('GET', `/api/shares/${shareId}/history`, { token: B.accessToken })).json;
-    assert.equal(b.share.isOwner, false); assert.equal(b.points.length, 2); assert.equal(b.points.filter((p) => p.m).length, 1);
-    assert.ok(b.points.every((p) => p.n === undefined)); assert.equal(b.points.find((p) => p.m).id, bSub); assert.equal(b.points.find((p) => !p.m).id, undefined);
+    assert.equal(b.share.isOwner, false); assert.equal(b.points.length, 1); assert.equal(b.points[0].id, bSub); assert.equal(b.points[0].m, 1);
+    assert.ok(b.points.every((p) => p.n === undefined));
     assert.equal(b.rows.length, 1); assert.equal(b.rows[0].id, bSub); assert.equal(b.rows[0].n, undefined);
     assert.ok(!JSON.stringify(b).includes('carol') && !JSON.stringify(b).toLowerCase().includes('"uid"') && !JSON.stringify(b).includes(C.user.id));
+  });
+  await t('chủ bài mở chi tiết bài nộp của người làm (chỉ đọc); người làm / người lạ không mở được bài của người khác', async () => {
+    const r = await call('GET', `/api/shares/${shareId}/submissions/${bSub}`, { token: A.accessToken }); assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.student, 'BOB'); assert.equal(r.json.submission.id, bSub); assert.equal(r.json.submission.readOnly, true); assert.equal(r.json.submission.note, undefined);
+    assert.equal((await call('GET', `/api/shares/${shareId}/submissions/${bSub}`, { token: B.accessToken })).status, 404);
+    assert.equal((await call('GET', `/api/shares/${shareId}/submissions/${bSub}`, { token: C.accessToken })).status, 404);
+    assert.equal((await call('GET', `/api/shares/${shareId}/submissions/${rid()}`, { token: A.accessToken })).status, 404);
+  });
+  await t('chủ bài tự làm bài của mình (đã chia sẻ) → hiện trong lịch sử chia sẻ với tên, không xoá được', async () => {
+    const ownSub = rid(); const r = await call('PUT', `/api/submissions/${ownSub}`, { token: A.accessToken, body: { itemType: 'quiz', itemId: quizId, answers: { 'mcq-1': ['B'] } } });
+    assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.submission.inShare, shareId);
+    const o = (await call('GET', `/api/shares/${shareId}/history`, { token: A.accessToken })).json;
+    assert.ok(o.rows.some((x) => x.id === ownSub && x.m === 1 && x.n), 'bài của chủ bài phải có trong lịch sử'); assert.ok(o.points.some((p) => p.id === ownSub));
+    const b = (await call('GET', `/api/shares/${shareId}/history`, { token: B.accessToken })).json; assert.ok(!b.rows.some((x) => x.id === ownSub));
+    const del = await call('DELETE', `/api/submissions/${ownSub}`, { token: A.accessToken }); assert.equal(del.status, 403); assert.equal(del.json.code, 'SHARED_LOCKED');
+    assert.equal((await call('GET', `/api/submissions/${ownSub}`, { token: A.accessToken })).status, 200);
   });
   await t('ảnh trong đề chia sẻ: người làm xem được ảnh của đề, nhưng không xem được ảnh khác của chủ', async () => {
     const up = async () => (await call('POST', '/api/images', { token: A.accessToken, raw: PNG(40), headers: { 'Content-Type': 'image/png' } })).json.image.id;
@@ -456,7 +472,7 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.equal((await call('GET', `/api/shares/${shareId}`, { token: B.accessToken })).status, 200);
     const del = await call('DELETE', `/api/submissions/${bSub}`, { token: B.accessToken }); assert.equal(del.status, 403); assert.equal(del.json.code, 'SHARED_LOCKED');   // bài nộp từ link chia sẻ không xoá được
     assert.equal((await call('GET', `/api/submissions/${bSub}`, { token: B.accessToken })).status, 200);
-    assert.equal((await call('GET', `/api/shares/${shareId}/history`, { token: A.accessToken })).json.points.length, 2);
+    assert.equal((await call('GET', `/api/shares/${shareId}/history`, { token: A.accessToken })).json.points.length, 3);   // Bob + Carol + bài tự làm của chủ bài
     assert.equal((await call('GET', `/api/overview`, { token: B.accessToken })).json.recent.some((x) => x.id === bSub), true);
   });
 

@@ -188,8 +188,13 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
 
   // ── Bài nộp ──
   router.get('/api/submissions', async (ctx) => ({ ok: true, submissions: await content.listSubmissions(authed(ctx).sub, { itemId: ctx.query.get('itemId') || undefined, limit: Number(ctx.query.get('limit')) || 100 }) }));
-  router.get('/api/submissions/:id', async (ctx) => ({ ok: true, submission: await content.getSubmission(authed(ctx).sub, ctx.params.id) }));
-  router.put('/api/submissions/:id', async (ctx) => ({ ok: true, submission: await content.submit(authed(ctx).sub, ctx.params.id, ctx.body) }));
+  const nameOf = (a) => async () => { const u = await auth.me(a); return u.displayName || u.username; };
+  router.get('/api/submissions/:id', async (ctx) => {
+    const a = authed(ctx);
+    const sub = await content.getSubmission(a.sub, ctx.params.id);
+    return { ok: true, submission: await content.joinOwnShare(a.sub, sub, nameOf(a)).catch(() => sub) };   // bài cũ của chủ bài (nộp sau khi bật chia sẻ) → tự vào lịch sử chia sẻ + khoá xoá
+  });
+  router.put('/api/submissions/:id', async (ctx) => { const a = authed(ctx); return { ok: true, submission: await content.submit(a.sub, ctx.params.id, ctx.body, nameOf(a)) }; });
   router.patch('/api/submissions/:id', async (ctx) => ({ ok: true, submission: await content.selfGrade(authed(ctx).sub, ctx.params.id, ctx.body) }));
   router.post('/api/submissions/:id/ai-grade', async (ctx) => {
     const a = await authedLive(ctx); if (!allow('ai:' + a.sub, 15, 3600e3)) throw new HttpError(429, 'Chấm AI quá nhiều lần trong 1 giờ', 'RATE');
@@ -209,7 +214,8 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   router.get('/api/share-link/:owner/:item', async (ctx) => ({ ok: true, ...(await content.resolveShare(authed(ctx).sub, ctx.params.owner, ctx.params.item)) }));
   router.patch('/api/shares/:sid', async (ctx) => ({ ok: true, ...(await content.setShareEnabled(authed(ctx).sub, ctx.params.sid, ctx.body.enabled !== false)) }));
   router.get('/api/shares/:sid', async (ctx) => ({ ok: true, ...(await content.getShared(authed(ctx).sub, ctx.params.sid)) }));
-  router.get('/api/shares/:sid/history', async (ctx) => ({ ok: true, ...(await content.sharedHistory(authed(ctx).sub, ctx.params.sid)) }));
+  router.get('/api/shares/:sid/history', async (ctx) => { const a = authed(ctx); return { ok: true, ...(await content.sharedHistory(a.sub, ctx.params.sid, nameOf(a))) }; });
+  router.get('/api/shares/:sid/submissions/:id', async (ctx) => ({ ok: true, ...(await content.sharedSubmission(authed(ctx).sub, ctx.params.sid, ctx.params.id)) }));   // chủ bài xem chi tiết bài nộp (chỉ đọc)
   router.put('/api/shares/:sid/submissions/:id', async (ctx) => {
     const a = authed(ctx); const u = await auth.me(a);
     return { ok: true, submission: await content.submitShared(a.sub, u.displayName || u.username, ctx.params.sid, ctx.params.id, ctx.body) };

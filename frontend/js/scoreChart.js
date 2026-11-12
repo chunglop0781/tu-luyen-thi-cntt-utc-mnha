@@ -2,7 +2,7 @@ import { h } from './ui.js';
 
 /* Biểu đồ điểm theo thời gian — chuyển từ public/js/historyChart.js của bản luyen-thi (SVG thuần, không thư viện).
    points: [{ t(ms), s(0–10), raw, max, m(1 = bài của chính mình), n(tên — chỉ chủ bài có), id(chỉ bài của mình) }]
-   isOwner: chủ bài thấy tên từng người; người làm thấy cả lớp ẩn danh, điểm của mình to + viền đen.
+   isOwner: chủ bài thấy tên từng người; người làm chỉ thấy điểm của CHÍNH MÌNH.
    onOpen(point): gọi khi bấm vào điểm có `id` (bài của mình). */
 
 const COLORS = ['#b91c1c', '#dc2626', '#ea580c', '#f59e0b', '#eab308', '#84cc16', '#22c55e', '#0d9488', '#0ea5e9', '#4f46e5'];
@@ -145,7 +145,7 @@ export function scoreChart({ isOwner, points = [], onOpen }) {
 
   const node = h('div', { class: 'card hc' },
     h('div', { class: 'row between' }, h('h3', null, 'Biểu đồ điểm ', rangeLabel), summary),
-    h('p', { class: 'muted hc-note' }, isOwner ? 'Điểm của tất cả người đã làm bài chia sẻ này (rê chuột để xem tên).' : 'Điểm của cả nhóm (ẩn danh) để bạn so sánh — chấm to viền đen là bài của bạn.'),
+    h('p', { class: 'muted hc-note' }, isOwner ? 'Điểm của tất cả người đã làm bài chia sẻ này (rê chuột để xem tên, bấm vào chấm để xem bài làm).' : 'Điểm các bài bạn đã nộp vào bài này (bấm vào chấm để xem chi tiết).'),
     h('div', { class: 'row hc-bar' }, ...presets, h('span', { class: 'muted' }, 'Xem theo:'), kindSel, inYear, inMonth, inDay,
       h('span', { class: 'hc-checks' }, othersChk ? h('label', null, othersChk, ' Hiện người khác') : null, h('label', null, lineChk, isOwner ? ' Nối các điểm' : ' Nối điểm của tôi'))),
     h('div', { class: 'hc-plot' }, svgHost, emptyEl, tip), legend,

@@ -17,11 +17,14 @@ Khi cần một màn hình có sẵn ở bản cũ (`views/*.pug`, `public/js/*.
 - Không tự thiết kế lại giao diện từ ảnh chụp — làm "giống" từng gây lỗi hiển thị (ví dụ đề bài bị giãn dòng).
 - Bản cũ render HTML đề bài thẳng, nên HTML đề (`item.prompt`) phải hiển thị bằng `richOrHtml()` / `safeHtml()` trong `js/ui.js` (giữ bảng, căn lề `text-align`, `colspan/rowspan`). CSS `.rich.html` **phải** là `white-space: normal`; chỉ văn bản thường mới `pre-wrap`.
 
-## 3. "Lịch sử làm bài"
+## 3. "Lịch sử làm bài" (chia sẻ)
 - Nút nằm **ngay dưới thanh chuông báo hết giờ** (`js/historyBtn.js`, dùng cho cả trắc nghiệm và tự luận).
-- Chủ bài → "Lịch sử làm bài của tất cả sinh viên" (thấy tên từng người đã nộp, có ô tìm theo tên).
-- Người khác → "Lịch sử làm bài của tôi": chỉ thấy bài của mình; biểu đồ điểm của cả lớp **ẩn danh** (không tên, không id bài nộp).
-- Backend: `GET /api/shares/:sid/history` (`content.sharedHistory`) đã lo phần phân quyền này — đừng đưa tên/id của người khác xuống người làm.
+- Chủ bài → "Lịch sử làm bài của tất cả sinh viên": thấy **tên + điểm + thời gian** từng người, có ô tìm theo tên, và bấm **"👁 Xem chi tiết"** (hoặc bấm chấm trên biểu đồ) để mở bài làm của họ ở `#/s/<sid>/submission/<id>` (chỉ đọc, giống admin xem `/submissions/:id` ở luyen-thi).
+- Người làm → "Lịch sử làm bài của tôi": CHỈ thấy bài + điểm của chính mình. **Không** có điểm ẩn danh của người khác trên biểu đồ.
+- Bài **chủ bài tự làm** trên bài của mình (sau khi bật chia sẻ) cũng được ghi vào lịch sử chia sẻ (`submission.inShare = <shareId>`, `content.joinOwnShare`; bài cũ được bù khi mở lịch sử / mở chi tiết bài).
+- Bài đã nộp vào bài chia sẻ (`shareId` hoặc `inShare`) **không xoá được** (403 `SHARED_LOCKED`; frontend ẩn nút xoá).
+- Backend: `GET /api/shares/:sid/history` (`content.sharedHistory`) lo phần phân quyền; `GET /api/shares/:sid/submissions/:id` (`content.sharedSubmission`, chỉ chủ bài) trả bài nộp đã lược ghi chú riêng / điểm tự chấm / tên prompt.
+- **Trang chi tiết bài nộp tự luận** (`js/pages/submissionDetail.js` + `css/sub-detail.css`) là bản **chép nguyên** `views/student/submission-detail.pug` của luyen-thi (cùng thứ tự khối, icon lucide vẽ inline). `submission.js` chỉ nối thêm các khối thao tác (tự chấm, chấm AI) bên dưới. Muốn đổi giao diện trang này thì sửa 2 file đó, không viết lại kiểu khác. Màu tối khai báo bằng biến trong `sub-detail.css` (không qua `gen_dark.py`).
 
 ## 4. Tên AI + ô chọn AI có tìm kiếm
 - **Tên AI** = tên người dùng tự đặt / sửa cho key của từng nhà cung cấp (Cài đặt → Nhà cung cấp AI → ô "Tên AI"). Lưu ở kho key riêng tư: `vault.names[<providerId>]`, đọc ra `vault.items[id].name` (tối đa 60 ký tự, để trống = xoá tên). Bài tự luận được chấm sẽ ghi `ai.keyName` để biết sau này AI nào đã chấm.

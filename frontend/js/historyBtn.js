@@ -3,7 +3,7 @@ import { h } from './ui.js';
 /* Nút "Lịch sử làm bài" đặt NGAY DƯỚI khối chuông báo hết giờ (#audioBar) —
    chuyển nguyên từ views/partials/lesson-history-btn.pug của bản luyen-thi.
      chủ bài  → "Lịch sử làm bài của tất cả sinh viên" (thấy ai đã nộp)
-     người làm → "Lịch sử làm bài của tôi" (chỉ bài của mình + biểu đồ điểm ẩn danh của cả lớp) */
+     người làm → "Lịch sử làm bài của tôi" (chỉ bài + điểm của chính mình) */
 
 const ICON = '<svg class="lhb-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>';
 export const historyLabel = (isOwner) => (isOwner ? 'Lịch sử làm bài của tất cả sinh viên' : 'Lịch sử làm bài của tôi');
