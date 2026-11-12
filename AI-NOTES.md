@@ -33,3 +33,15 @@ Khi cần một màn hình có sẵn ở bản cũ (`views/*.pug`, `public/js/*.
 - **DOM gốc `append / replaceChildren(null)` in ra chữ "null"** (hàm `h()` thì đã lọc). `ui.js` có lưới an toàn lọc null/false cho `append/prepend/replaceChildren`; vẫn nên viết `...(cond ? [node] : [])`.
 - **Trang chạy trong SPA (đổi `#/…` không tải lại)**: mọi `document/window.addEventListener`, `setInterval`, đọc to… phải gỡ khi rời trang. Module legacy trả về hàm `dispose()` (flashcardStudy, quizTake, quizEditor dùng `_on(...)`), trang gọi qua `ctx.setCleanup`.
 - **Độ rộng giống luyen-thi**: khung thường `max-width:1280px` (lề 16/24/32); trang làm bài (`.ep-page` tự luận: 1400px + `padding:0 4%`; `.exam-page` trắc nghiệm: `min(1500px, 100% − 28px)`) nằm ngoài khung đó — `app.js` tự thêm class `wide` cho `<main>` khi trang có `.exam-page`/`.ep-page`.
+
+## 6. Cập nhật mới (giao diện tối/sáng, OTP, tự luận, chia sẻ AI key)
+- **Tự luận**: CSS trang làm bài **chép nguyên** từ `luyen-thi-cntt-utc-mnha/views/student/lesson.pug` sang `frontend/css/essay.css` (thêm tiền tố `.lesson-page` vào selector; bỏ phần vẽ tay). `js/pages/practice.js` dùng đúng class/markup của bản cũ (`.ai-bar`, `.lesson-layout`, `.panel`, `.writing-input`, `.audio-bar`…). Không viết lại CSS "giống giống" — sửa giao diện thì sửa `essay.css`.
+- **Khoá tua chuông báo hết giờ**: `js/alarmSeekLock.js` (dùng cho chuông ở trang tự luận và `legacy/quizTake.js`). Chuông vẫn phát lặp nhưng kéo thanh tua / đổi tốc độ đều bị đưa về vị trí cũ; trước khi chủ động đặt `currentTime` phải gọi `lock.reset()`.
+- **Sáng/Tối** (mặc định SÁNG): `js/theme.js` + `css/theme.css` (biến màu) + `css/theme-dark.css` (**tự sinh**: `python3 tools/gen_dark.py frontend css/style.css css/quiz-exam.css css/quiz-form.css css/flashcards.css css/subject-picker.css css/essay.css js/pages/quiz.js > frontend/css/theme-dark.css`). Sửa CSS gốc xong nhớ chạy lại lệnh này. Lựa chọn lưu ở `localStorage['utc.theme']`.
+- **OTP**: mọi màn nhập OTP (đăng ký, quên mật khẩu) có khung nhắc kiểm tra Spam/Thư rác + toast sau khi gửi/gửi lại mã.
+- **Chia sẻ AI key**: link `#/ai-key/<id-ai-key>?id=<id-user>`.
+  - Chủ key bật chia sẻ ở Cài đặt → Nhà cung cấp AI (`POST /api/ai-key/:kid/share`). Mặc định TẮT.
+  - Người nhận mở link (phải đăng nhập) → xem trước (`GET /api/ai-key/:kid?id=`, không lộ key) → `POST /api/ai-key/:kid/accept`: nhà cung cấp + key được sao chép, mã hoá lại bằng khoá của người nhận.
+  - Bản nhận được đánh dấu `createdBy: "<id-user>"` (lưu trong `private/<uid>/vault.json` → `createdBy[<id>]`, hiện ra ở `/api/ai/providers` và `/api/me/vault`). Key có `createdBy` **không chia sẻ lại được** (403 `NO_RESHARE`) và không sửa được địa chỉ API (tránh chuyển key ra ngoài). Nếu người nhận dán API key riêng vào thì dấu `createdBy` được gỡ (key đó là của họ).
+  - Tắt chia sẻ chỉ chặn người nhận MỚI; bản đã sao chép không bị thu hồi. Gemini (dựng sẵn) chỉ nhận được khi người nhận chưa có key Gemini riêng.
+  - Test: `backend/test/run.js` → "chia sẻ AI key…".

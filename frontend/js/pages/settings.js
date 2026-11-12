@@ -98,19 +98,21 @@ export async function aiSettingsPage() {
     }));
     const rmKey = h('button', { class: 'btn ghost danger' }, 'Xoá key');
     rmKey.addEventListener('click', action(rmKey, async () => { if (!(await confirmBox(`Xoá key ${p.label} đã lưu?`))) return; await put('/api/me/vault', { providers: { [p.id]: { key: '' } } }); toast('Đã xoá key', 'ok'); await reload(); }));
-    const editBtn = p.builtin ? null : h('button', { class: 'btn ghost' }, '✏️ Sửa nhà cung cấp');
+    const editBtn = p.builtin ? null : h('button', { class: 'btn ghost' }, '✏️ Sửa nhà cung cấp');   // key nhận: server tự khoá địa chỉ API
     if (editBtn) editBtn.addEventListener('click', () => { card.replaceWith(providerForm(p)); });
     const delBtn = p.builtin ? null : h('button', { class: 'btn ghost danger' }, '🗑 Xoá nhà cung cấp');
     if (delBtn) delBtn.addEventListener('click', action(delBtn, async () => { if (!(await confirmBox(`Xoá nhà cung cấp "${p.label}" cùng key đã lưu?`))) return; await del(`/api/ai/providers/${p.id}`); toast('Đã xoá', 'ok'); await reload(); }));
 
+    // ★ Chia sẻ AI key: link #/ai-key/<id-ai-key>?id=<id-user>. Key nhận từ người khác (createdBy) KHÔNG chia sẻ lại được.
+    const shareBox = shareControls(p, it, reload);
     const card = h('div', { class: 'card stack prov' },
       h('div', { class: 'row between' },
-        h('h3', null, it.name ? it.name : p.label, ' ', it.name ? h('span', { class: 'badge' }, p.label) : null, h('span', { class: 'badge' }, p.builtin ? 'dựng sẵn' : p.id), isDefault ? h('span', { class: 'badge quiz' }, 'mặc định') : null, it.keySet ? h('span', { class: 'badge good-b' }, '✓ có key') : h('span', { class: 'badge' }, 'chưa có key')),
+        h('h3', null, it.name ? it.name : p.label, ' ', it.name ? h('span', { class: 'badge' }, p.label) : null, h('span', { class: 'badge' }, p.builtin ? 'dựng sẵn' : p.id), isDefault ? h('span', { class: 'badge quiz' }, 'mặc định') : null, it.keySet ? h('span', { class: 'badge good-b' }, '✓ có key') : h('span', { class: 'badge' }, 'chưa có key'), it.createdBy ? h('span', { class: 'badge', title: 'createdBy: ' + it.createdBy }, '🎁 được chia sẻ') : null),
         h('div', { class: 'row' }, editBtn, delBtn)),
       p.baseUrl ? h('p', { class: 'muted' }, h('code', null, p.baseUrl + p.chatPath)) : h('p', { class: 'muted' }, 'API Google Gemini (generateContent)'),
       field('Tên AI', h('div', { class: 'row' }, nameEl, nameBtn), '(tự đặt để dễ tìm — để trống = dùng tên nhà cung cấp)'),
       h('div', { class: 'ai-grid' }, field('Model', modelEl, p.allowCustomModel ? '(chọn gợi ý hoặc tự gõ)' : ''), field(`API key ${p.label}`, withToggle(key))), extra,
-      h('div', { class: 'row' }, saveBtn, testBtn, defBtn, it.keySet ? rmKey : null), result);
+      h('div', { class: 'row' }, saveBtn, testBtn, defBtn, it.keySet ? rmKey : null), shareBox, result);
     return card;
   }
 
@@ -167,4 +169,48 @@ export async function aiSettingsPage() {
   }
   draw();
   return root;
+}
+
+
+/** Khối "Chia sẻ AI key" trong thẻ nhà cung cấp. it = vault.items[p.id]. */
+function shareControls(p, it, reload) {
+  if (it.createdBy) {      // key nhận được → không chia sẻ lại
+    return h('div', { class: 'alert info' }, '🎁 Key này do một tài khoản khác chia sẻ cho bạn (createdBy: ', h('code', null, it.createdBy), '). Bạn dùng được để chấm/phân tích nhưng không thể chia sẻ lại cho người khác. Nếu dán API key riêng của bạn vào ô trên, key sẽ trở thành của bạn.');
+  }
+  if (!it.keySet) return null;
+  const uid = session.get().user.id;
+  const link = `${location.origin}${location.pathname}#/ai-key/${p.id}?id=${uid}`;
+  const toggle = h('button', { class: it.shared ? 'btn ghost danger' : 'btn' }, it.shared ? '⛔ Tắt chia sẻ' : '🔗 Chia sẻ key này');
+  toggle.addEventListener('click', action(toggle, async () => {
+    if (!it.shared && !(await confirmBox('Người mở link (đã đăng nhập) sẽ NHẬN ĐƯỢC một bản sao API key này và dùng được nó để gọi AI trên tài khoản của chủ key. Chỉ chia sẻ cho người bạn tin tưởng. Tiếp tục?'))) return;
+    await post(`/api/ai-key/${p.id}/share`, { enabled: !it.shared });
+    toast(it.shared ? 'Đã tắt chia sẻ — link không còn nhận được key mới (bản đã nhận vẫn còn)' : 'Đã bật chia sẻ — hãy sao chép link bên dưới', 'ok'); await reload();
+  }));
+  if (!it.shared) return h('div', { class: 'row' }, toggle, h('small', { class: 'muted' }, 'Chia sẻ key cho người khác qua link (người nhận không thể chia sẻ tiếp).'));
+  const linkEl = h('input', { readonly: true, value: link, 'aria-label': 'Link chia sẻ AI key' });
+  linkEl.addEventListener('focus', () => linkEl.select());
+  const copy = h('button', { class: 'btn small', type: 'button' }, '📋 Sao chép link');
+  copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(link); toast('Đã sao chép link chia sẻ AI key', 'ok'); } catch { linkEl.select(); toast('Hãy bấm Ctrl+C để sao chép', 'warn'); } });
+  return h('div', { class: 'stack' }, h('div', { class: 'alert warn' }, '🔗 Đang chia sẻ: ai có link và đăng nhập đều nhận được key này. Tắt chia sẻ khi không cần.'), h('div', { class: 'row' }, linkEl, copy, toggle));
+}
+
+/** Trang mở từ link #/ai-key/<id-ai-key>?id=<id-user>: xem trước (không lộ key) rồi bấm "Nhận key". */
+export async function aiKeyLinkPage(ctx, m) {
+  const kid = m[1], owner = ctx.query.get('id') || '';
+  if (!/^(?:[a-f0-9]{16,32}|\d{10,14}_[a-f0-9]{8,24})$/.test(owner)) throw new Error('Link chia sẻ thiếu id người chia sẻ (?id=…)');
+  const pv = await get(`/api/ai-key/${kid}?id=${owner}`);
+  const k = pv.key; const out = h('div');
+  const btn = h('button', { class: 'btn primary', disabled: !!pv.blocked }, pv.already ? '🔄 Làm mới key đã nhận' : '📥 Nhận AI key này');
+  btn.addEventListener('click', action(btn, async () => {
+    const r = await post(`/api/ai-key/${kid}/accept`, { ownerId: owner });
+    toast(r.refreshed ? 'Đã làm mới key' : 'Đã nhận AI key — dùng được ngay khi chấm bài', 'ok'); ctx.go('/settings/ai');
+  }));
+  return h('div', { class: 'card stack', style: 'max-width:560px;margin:24px auto' },
+    h('h2', null, '🎁 Có người chia sẻ AI key cho bạn'),
+    h('p', null, h('b', null, k.name || k.label), ' ', h('span', { class: 'badge' }, k.label)),
+    h('p', { class: 'muted' }, 'Máy chủ AI: ', h('code', null, k.host), k.models && k.models.length ? ` · model: ${k.models.slice(0, 4).join(', ')}${k.models.length > 4 ? '…' : ''}` : ''),
+    h('p', { class: 'muted' }, 'Người chia sẻ (createdBy): ', h('code', null, k.createdBy)),
+    h('div', { class: 'alert info' }, 'Key được sao chép vào tài khoản của bạn, mã hoá và KHÔNG hiển thị lại. Bạn dùng nó để chấm bài / phân tích nhưng không thể chia sẻ tiếp cho người khác.'),
+    pv.blocked ? h('div', { class: 'alert err' }, pv.blocked) : null, out,
+    h('div', { class: 'row' }, btn, h('a', { class: 'btn ghost', href: '#/settings/ai' }, 'Về cài đặt AI')));
 }

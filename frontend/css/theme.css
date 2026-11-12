@@ -1,0 +1,17 @@
+/* css/theme.css — chuyển giao diện Sáng / Tối (mặc định SÁNG). Chỉ khai báo biến màu của app + nút chuyển;
+   phần màu cứng của từng trang nằm ở css/theme-dark.css (tự sinh bằng tools/gen_dark.py). */
+html[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0f1115;--card:#171a21;--text:#e5e7eb;--muted:#9aa3b2;--line:#2a2f3a;--soft:#1e222b;
+  --pri:#7479f2;--pri-h:#8f94f7;--pri-t:#fff;--pri-soft:#23264a;--ring:rgba(116,121,242,.38);
+  --good:#4ade80;--mid:#fbbf24;--low:#f87171;--sh:0 1px 2px rgba(0,0,0,.5);--sh2:0 10px 25px -8px rgba(0,0,0,.65)
+}
+html[data-theme="dark"] body{background:var(--bg);color:var(--text)}
+html[data-theme="dark"] .modal-back{background:rgba(0,0,0,.6)}
+html[data-theme="dark"] a{color:#9aa0ff}
+html[data-theme="dark"] .btn.primary,html[data-theme="dark"] .btn.primary:hover{color:#fff}
+html[data-theme="dark"] img.pic{background:#fff}
+html[data-theme="dark"] audio{color-scheme:dark}
+.theme-toggle{font-size:16px;line-height:1;padding:6px 9px}
+.auth-theme{position:fixed;top:12px;right:12px;z-index:40}
+.auth-theme .theme-toggle{border:1px solid var(--line);background:var(--card)}

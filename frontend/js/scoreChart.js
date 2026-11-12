@@ -113,16 +113,16 @@ export function scoreChart({ isOwner, points = [], onOpen }) {
     svg.style.cssText = 'display:block;max-width:100%;height:auto';
     for (let i = 0; i < 10; i++) svgEl('rect', { x: M.l, y: Y(i + 1), width: PW, height: PH / 10, fill: COLORS[i], 'fill-opacity': 0.07 }, svg);
     for (let g = 0; g <= 10; g++) {
-      svgEl('line', { x1: M.l, x2: M.l + PW, y1: Y(g), y2: Y(g), stroke: '#e5e7eb', 'stroke-width': 1 }, svg);
-      svgEl('text', { x: M.l - 8, y: Y(g) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#6b7280' }, svg).textContent = g;
+      svgEl('line', { x1: M.l, x2: M.l + PW, y1: Y(g), y2: Y(g), stroke: 'var(--line)', 'stroke-width': 1 }, svg);
+      svgEl('text', { x: M.l - 8, y: Y(g) + 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--muted)' }, svg).textContent = g;
     }
     makeTicks(r.a, r.b).forEach((tk) => {
       const x = X(tk.t); if (x < M.l - 0.5 || x > M.l + PW + 0.5) return;
-      svgEl('line', { x1: x, x2: x, y1: M.t, y2: M.t + PH, stroke: '#f1f5f9', 'stroke-width': 1 }, svg);
-      svgEl('line', { x1: x, x2: x, y1: M.t + PH, y2: M.t + PH + 4, stroke: '#9ca3af', 'stroke-width': 1 }, svg);
-      svgEl('text', { x, y: M.t + PH + 18, 'text-anchor': 'middle', 'font-size': 11, fill: '#6b7280' }, svg).textContent = tk.label;
+      svgEl('line', { x1: x, x2: x, y1: M.t, y2: M.t + PH, stroke: 'var(--soft)', 'stroke-width': 1 }, svg);
+      svgEl('line', { x1: x, x2: x, y1: M.t + PH, y2: M.t + PH + 4, stroke: 'var(--muted)', 'stroke-width': 1 }, svg);
+      svgEl('text', { x, y: M.t + PH + 18, 'text-anchor': 'middle', 'font-size': 11, fill: 'var(--muted)' }, svg).textContent = tk.label;
     });
-    svgEl('rect', { x: M.l, y: M.t, width: PW, height: PH, fill: 'none', stroke: '#d1d5db', 'stroke-width': 1 }, svg);
+    svgEl('rect', { x: M.l, y: M.t, width: PW, height: PH, fill: 'none', stroke: 'var(--line)', 'stroke-width': 1 }, svg);
 
     const sorted = inRange.slice().sort((p, q) => p.t - q.t);
     const linePts = isOwner ? sorted : sorted.filter((p) => p.m);          // người làm: chỉ nối điểm của mình

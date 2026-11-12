@@ -491,7 +491,85 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
 
   async function aiProviders(uid) {
     const list = await userProviders(uid);
-    return { providers: list.map(publicProvider), presets: publicPresets(), max: MAX_PROVIDERS };
+    const v = await store.read('account', vaultPath(uid)); const d = v ? v.data : {};
+    const mark = (p) => ({ ...publicProvider(p), createdBy: (d.createdBy && d.createdBy[p.id]) || null, shared: !!(d.shared && d.shared[p.id]) });
+    return { providers: list.map(mark), presets: publicPresets(), max: MAX_PROVIDERS };
+  }
+
+  // ───────── Chia sẻ AI key: #/ai-key/<id-ai-key>?id=<id-user> ─────────
+  // Quy luật: chủ key BẬT chia sẻ → người nhận mở link (đã đăng nhập) và bấm "Nhận key" → key được sao chép (mã hoá lại bằng khoá của người nhận)
+  // và đánh dấu createdBy = id người chia sẻ. Key đã đánh dấu createdBy KHÔNG chia sẻ tiếp được, không sửa địa chỉ API (tránh chuyển key ra ngoài).
+  const createdByOf = (d, id) => (d && d.createdBy && d.createdBy[id]) || null;
+  const keyOf = (d, id, uid) => { const enc = (d.keys && d.keys[id]) || (id === 'gemini' ? d.geminiKeyEnc : ''); if (!enc) return ''; try { return decryptText(vkey(), enc, uid); } catch { return ''; } };
+  const mustKeyId = (id) => { if (!/^[a-z][a-z0-9_-]{1,31}$/.test(String(id || ''))) throw new HttpError(400, 'id AI key không hợp lệ', 'BAD_ID'); return String(id); };
+
+  /** Chủ key bật/tắt chia sẻ. Key nhận từ người khác (có createdBy) → từ chối. */
+  async function setKeyShare(uid, id, enabled) {
+    mustKeyId(id);
+    const list = await userProviders(uid); const p = findProvider(list, id);
+    if (!p) throw new HttpError(404, 'Không tìm thấy AI key', 'NOT_FOUND');
+    const r = await store.read('account', vaultPath(uid), { fresh: true }); const d = r ? r.data : {};
+    if (createdByOf(d, id)) throw new HttpError(403, 'Key này do người khác chia sẻ cho bạn (createdBy) nên không thể chia sẻ lại cho người khác', 'NO_RESHARE');
+    if (enabled && !keyOf(d, id, uid)) throw new HttpError(400, 'Chưa lưu API key cho nhà cung cấp này — hãy dán key trước khi chia sẻ', 'NO_KEY');
+    await store.update('account', vaultPath(uid), (x) => {
+      x = x || {}; x.shared = x.shared || {};
+      if (enabled) x.shared[id] = true; else delete x.shared[id];
+      return x;
+    }, { message: `vault ${uid}`, defaultValue: {} });
+    return { id, userId: uid, enabled: !!enabled, path: `/ai-key/${id}?id=${uid}` };
+  }
+
+  /** Xem trước link chia sẻ (KHÔNG lộ key). */
+  async function previewKeyShare(uid, ownerId, id) {
+    mustId(ownerId); mustKeyId(id);
+    const ownList = await userProviders(ownerId); const p = findProvider(ownList, id);
+    const r = await store.read('account', vaultPath(ownerId)); const d = r ? r.data : {};
+    if (!p || !(d.shared && d.shared[id]) || createdByOf(d, id) || !keyOf(d, id, ownerId)) throw new HttpError(404, 'Link chia sẻ AI key không tồn tại hoặc chủ key đã tắt chia sẻ', 'NOT_FOUND');
+    const mine = await userProviders(uid); const mr = await store.read('account', vaultPath(uid)); const md = mr ? mr.data : {};
+    const already = mine.find((q) => createdByOf(md, q.id) === ownerId && (q.id === id || q.id.startsWith(id.slice(0, 20) + '-')));
+    let blocked = null;
+    if (uid === ownerId) blocked = 'Đây là key của chính bạn';
+    else if (id === 'gemini' && keyOf(md, 'gemini', uid) && !createdByOf(md, 'gemini')) blocked = 'Bạn đã có API key Google Gemini của riêng mình — xoá key đó trước nếu muốn nhận key này';
+    else if (!already && mine.length >= MAX_PROVIDERS) blocked = `Danh sách AI của bạn đã đủ ${MAX_PROVIDERS} nhà cung cấp`;
+    return { key: { id, label: p.label, kind: p.kind, host: p.baseUrl ? new URL(p.baseUrl).host : 'generativelanguage.googleapis.com', models: p.models.slice(0, 8), name: (d.names && d.names[id]) || '', createdBy: ownerId }, already: !!already, blocked };
+  }
+
+  /** Người nhận bấm "Nhận key": sao chép nhà cung cấp + key (mã hoá lại), đánh dấu createdBy = chủ key. */
+  async function acceptKeyShare(uid, ownerId, id) {
+    const pv = await previewKeyShare(uid, ownerId, id);
+    if (pv.blocked) throw new HttpError(400, pv.blocked, 'BLOCKED');
+    const ownList = await userProviders(ownerId); const src = findProvider(ownList, id);
+    const or = await store.read('account', vaultPath(ownerId)); const od = or.data;
+    const secret = keyOf(od, id, ownerId);
+    const mine = await userProviders(uid); const mr = await store.read('account', vaultPath(uid), { fresh: true }); const md = mr ? mr.data : {};
+    // id đích: gemini → gemini; nhà khác → giữ id, nếu trùng (không phải bản nhận trước đó từ cùng chủ) thì thêm hậu tố
+    let newId = id, refresh = false;
+    if (id !== 'gemini') {
+      const prior = mine.find((q) => createdByOf(md, q.id) === ownerId && (q.id === id || q.id.startsWith(id.slice(0, 20) + '-')));
+      if (prior) { newId = prior.id; refresh = true; }
+      else {
+        const taken = new Set(mine.map((q) => q.id)); newId = id;
+        for (let i = 0; taken.has(newId) && i < 50; i++) newId = `${id.slice(0, 20)}-${i === 0 ? ownerId.replace(/[^a-z0-9]/g, '').slice(0, 5) : randomId(4).toLowerCase()}`;
+        if (taken.has(newId)) throw new HttpError(409, 'Không tạo được mã AI key', 'EXISTS');
+      }
+    }
+    if (id !== 'gemini' && !refresh) {
+      const n = normalizeProviderInput({ ...src, id: newId });
+      if (!n.value) throw new HttpError(400, n.errors[0], 'VALIDATION');
+      await saveAiDoc(uid, mine.concat([n.value]));
+    }
+    await store.update('account', vaultPath(uid), (x) => {
+      x = x || {}; x.keys = x.keys || {}; x.models = x.models || {}; x.names = x.names || {}; x.createdBy = x.createdBy || {};
+      x.keys[newId] = encryptText(vkey(), secret, uid);
+      if (!x.models[newId] && od.models && od.models[id]) x.models[newId] = od.models[id];
+      if (!x.names[newId]) x.names[newId] = (od.names && od.names[id]) || '';
+      if (!x.names[newId]) delete x.names[newId];
+      x.createdBy[newId] = ownerId;               // ★ đánh dấu người chia sẻ
+      if (x.shared) delete x.shared[newId];       // không bao giờ chia sẻ lại
+      x.updatedAt = nowIso();
+      return x;
+    }, { message: `vault ${uid}`, defaultValue: {} });
+    return { id: newId, createdBy: ownerId, refreshed: refresh };
   }
 
   /** Thêm (id=null) hoặc sửa nhà cung cấp kiểu OpenAI. */
@@ -501,6 +579,10 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     if (id && !prev) throw new HttpError(404, 'Không tìm thấy nhà cung cấp', 'NOT_FOUND');
     if (prev && prev.builtin) throw new HttpError(400, 'Google Gemini là nhà cung cấp dựng sẵn, không sửa được', 'AI_PROVIDER');
     if (!prev && list.length >= MAX_PROVIDERS) throw new HttpError(400, `Tối đa ${MAX_PROVIDERS} nhà cung cấp`, 'LIMIT');
+    if (prev) {   // key do người khác chia sẻ: không cho đổi nơi gửi key đi (tránh lấy key ra ngoài)
+      const vr = await store.read('account', vaultPath(uid)); const by = createdByOf(vr && vr.data, prev.id);
+      if (by) input = { ...input, baseUrl: prev.baseUrl, chatPath: prev.chatPath, authHeader: prev.authHeader, authScheme: prev.authScheme, subscribeRegex: prev.subscribeRegex };
+    }
     const n = normalizeProviderInput(input, prev);
     if (!n.value) throw new HttpError(400, n.errors[0], 'VALIDATION');
     if (!prev && findProvider(list, n.value.id)) throw new HttpError(409, `Mã "${n.value.id}" đã tồn tại`, 'EXISTS');
@@ -515,7 +597,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     if (prev.builtin) throw new HttpError(400, 'Không xoá được Google Gemini (dựng sẵn)', 'AI_PROVIDER');
     await saveAiDoc(uid, list.filter((p) => p.id !== prev.id));
     await store.update('account', vaultPath(uid), (d) => {      // xoá luôn key + model đã lưu cho nhà này
-      if (!d) return undefined; if (d.keys) delete d.keys[prev.id]; if (d.models) delete d.models[prev.id]; if (d.names) delete d.names[prev.id]; if (d.provider === prev.id) d.provider = 'gemini'; return d;
+      if (!d) return undefined; if (d.keys) delete d.keys[prev.id]; if (d.models) delete d.models[prev.id]; if (d.names) delete d.names[prev.id]; if (d.createdBy) delete d.createdBy[prev.id]; if (d.shared) delete d.shared[prev.id]; if (d.provider === prev.id) d.provider = 'gemini'; return d;
     }, { message: `vault ${uid}` });
   }
 
@@ -528,7 +610,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
       const enc = (d.keys && d.keys[p.id]) || (p.id === 'gemini' ? d.geminiKeyEnc : '');   // d.geminiKeyEnc: dữ liệu bản cũ
       let key = '';
       if (enc) { try { key = decryptText(vkey(), enc, uid); } catch { key = ''; } }
-      items[p.id] = { keySet: !!key, model: (d.models && d.models[p.id]) || (p.id === 'gemini' ? d.geminiModel : '') || '', name: (d.names && d.names[p.id]) || '' };   // name = tên AI do người dùng đặt (để tìm lại)
+      items[p.id] = { keySet: !!key, createdBy: (d.createdBy && d.createdBy[p.id]) || null, shared: !!(d.shared && d.shared[p.id]), model: (d.models && d.models[p.id]) || (p.id === 'gemini' ? d.geminiModel : '') || '', name: (d.names && d.names[p.id]) || '' };   // name = tên AI do người dùng đặt (để tìm lại)
       if (key) keys[p.id] = key;
     }
     const provider = findProvider(list, d.provider) ? d.provider : 'gemini';
@@ -565,7 +647,10 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
       if (d.geminiModel && d.models.gemini === undefined) d.models.gemini = d.geminiModel;
       delete d.geminiKeyEnc; delete d.geminiModel;
       for (const [id, v] of Object.entries(upd)) {
-        if (v.key !== undefined) { if (v.key === '' || v.key === null) delete d.keys[id]; else d.keys[id] = encryptText(vkey(), v.key, uid); }
+        if (v.key !== undefined) {
+          if (v.key === '' || v.key === null) { delete d.keys[id]; if (d.shared) delete d.shared[id]; if (d.createdBy) delete d.createdBy[id]; }
+          else { d.keys[id] = encryptText(vkey(), v.key, uid); if (d.createdBy) delete d.createdBy[id]; if (d.shared) delete d.shared[id]; }   // dán key riêng → không còn là key được chia sẻ
+        }
         if (v.model !== undefined) { if (v.model) d.models[id] = v.model; else delete d.models[id]; }
         if (v.name !== undefined) { if (v.name) d.names[id] = v.name; else delete d.names[id]; }
       }
@@ -605,7 +690,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     return { exportedAt: nowIso(), items: items.filter(Boolean), submissions: subs.filter(Boolean), prompts: await prompts.list(uid).catch(() => []) };
   }
 
-  return { prompts, overview, shareIdOf, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, resolveShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
+  return { setKeyShare, previewKeyShare, acceptKeyShare, prompts, overview, shareIdOf, getItem, putItem, deleteItem, submit, getSubmission, listSubmissions, selfGrade, aiGrade, aiAnalyze, deleteSubmission, readVault, writeVault, resolveAi, testAi, aiProviders, saveProvider, deleteProvider, reindex, exportAll, imageRefs, createShare, resolveShare, setShareEnabled, getShared, sharedImage, submitShared, sharedHistory };
 }
 
 module.exports = { createContent };

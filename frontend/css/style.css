@@ -17,7 +17,7 @@ h2,h3{margin:.2em 0 .5em}
 /* Khung rộng giống luyen-thi (max-w-7xl = 1280px, lề px-4 / sm:px-6 / lg:px-8; py-8) */
 @media (min-width:640px){:root{--gx:24px}}@media (min-width:1024px){:root{--gx:32px}}
 .wrap{max-width:1280px;margin:0 auto;padding:32px var(--gx) 64px}
-/* Trang làm bài (tự luận .ep-page, trắc nghiệm .exam-page): như luyen-thi, nằm ngoài khung 1280px, tự đặt bề rộng riêng */
+/* Trang làm bài (tự luận .lesson-page, trắc nghiệm .exam-page): như luyen-thi, nằm ngoài khung 1280px, tự đặt bề rộng riêng */
 .wrap.wide{max-width:none;padding:0 0 40px}
 
 /* ── Thanh trên ── */
@@ -176,4 +176,4 @@ textarea[spellcheck=false]{font-family:ui-monospace,Menlo,Consolas,monospace;fon
 .rich.html pre{white-space:pre-wrap;background:var(--soft);padding:10px 12px;border-radius:8px;overflow-x:auto}
 
 /* Ô chọn AI / model có tìm kiếm trong thanh AI (subject-picker.css của bản cũ, kiểu .sp-compact) */
-.ep-sel .sp{min-width:200px;max-width:300px}.ai-pick .sp{min-width:200px}
+.ai-selectors .sp{min-width:200px;max-width:300px}.ai-pick .sp{min-width:200px}

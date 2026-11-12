@@ -1,3 +1,4 @@
+import { themeToggle } from '../theme.js';
 import { authCall, authPost, nextPage } from '../api.js';
 import { h, toast, logo, withToggle } from '../ui.js';
 
@@ -37,13 +38,15 @@ export function loginPage(ctx) {
     timer = setInterval(() => { left = Math.max(0, left - 1); tick(); }, 1000);
     again.addEventListener('click', async () => {
       again.disabled = true;
-      try { const r = await resendFn(); left = (r && r.resendIn) || 60; toast('Đã gửi lại mã, kiểm tra hộp thư (cả mục Spam)', 'ok'); }
+      try { const r = await resendFn(); left = (r && r.resendIn) || 60; toast('Đã gửi lại mã — nếu chưa thấy thư, hãy kiểm tra mục Spam / Thư rác', 'ok', 7000); }
       catch (e) { toast(e.message, 'err', 6000); left = 0; }
       tick();
     });
     return { code, row: h('div', { class: 'row between' }, again, info) };
   }
 
+  /** Thông báo hiện ở mọi màn hình nhập OTP: thư mã thường rơi vào Spam. */
+  const spamNote = () => alertBox('warn', '📬 Thư gửi mã OTP có thể nằm trong mục Thư rác / Spam (hoặc tab Quảng cáo, Cập nhật). Nếu chưa thấy trong Hộp thư đến, vui lòng kiểm tra mục Spam.');
   const links = (...kids) => h('div', { class: 'links' }, ...kids);
   const head = (title, sub) => [h('h2', null, title), h('p', { class: 'muted' }, sub)];
 
@@ -70,6 +73,7 @@ export function loginPage(ctx) {
       const body = { username: u.value, email: em.value, password: p.value, displayName: n.value, invite: inv.value || undefined };
       const r = await authPost('register/start', body);
       pending = { body, email: r.email, resendIn: r.resendIn || 60 };
+      toast('Đã gửi mã OTP — nếu chưa thấy thư, hãy kiểm tra mục Spam / Thư rác', 'ok', 7000);
       go('otp');
     });
     box.replaceChildren(
@@ -90,7 +94,7 @@ export function loginPage(ctx) {
     });
     box.replaceChildren(
       ...head('Nhập mã xác minh', `Mã 6 số đã gửi tới ${pending.email}. Có hiệu lực 10 phút (chưa thấy thì xem mục Spam).`),
-      form, links(link('← Sửa thông tin đăng ký', () => go('register'))),
+      spamNote(), form, links(link('← Sửa thông tin đăng ký', () => go('register'))),
     );
     f.code.focus();
   }
@@ -102,6 +106,7 @@ export function loginPage(ctx) {
     submit(form, btn, async () => {
       const r = await authPost('reset/start', { email: em.value });
       pending = { email: em.value, shown: r.email, resendIn: r.resendIn || 60 };
+      toast('Đã gửi mã OTP — nếu chưa thấy thư, hãy kiểm tra mục Spam / Thư rác', 'ok', 7000);
       go('reset');
     });
     box.replaceChildren(
@@ -122,13 +127,14 @@ export function loginPage(ctx) {
     });
     box.replaceChildren(
       ...head('Đặt lại mật khẩu', `Mã 6 số đã gửi tới ${pending.shown} (nếu email này có tài khoản). Có hiệu lực 10 phút.`),
-      form, links(link('← Quay lại đăng nhập', () => go('login'))),
+      spamNote(), form, links(link('← Quay lại đăng nhập', () => go('login'))),
     );
     f.code.focus();
   }
 
   draw();
   return h('div', { class: 'auth-wrap' },
+    h('div', { class: 'auth-theme' }, themeToggle()),
     h('div', { class: 'auth-brand' }, logo(), h('div', null, h('b', null, 'Tự luyện thi của mnha'), h('span', null, 'Tự tạo bài, tự ôn, tự chấm'))),
     box);
 }

@@ -99,6 +99,13 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   router.post('/api/ai/providers', async (ctx) => ({ ok: true, provider: await content.saveProvider(authed(ctx).sub, null, ctx.body) }), { status: 201 });
   router.put('/api/ai/providers/:id', async (ctx) => ({ ok: true, provider: await content.saveProvider(authed(ctx).sub, ctx.params.id, ctx.body) }));
   router.delete('/api/ai/providers/:id', async (ctx) => { await content.deleteProvider(authed(ctx).sub, ctx.params.id); return { ok: true }; });
+  // ── Chia sẻ AI key (link: /ai-key/<id-ai-key>?id=<id-user>). Key nhận về có createdBy nên không chia sẻ lại được ──
+  router.post('/api/ai-key/:kid/share', async (ctx) => ({ ok: true, ...(await content.setKeyShare(authed(ctx).sub, ctx.params.kid, ctx.body.enabled !== false)) }));
+  router.get('/api/ai-key/:kid', async (ctx) => ({ ok: true, ...(await content.previewKeyShare(authed(ctx).sub, ctx.query.get('id') || '', ctx.params.kid)) }));
+  router.post('/api/ai-key/:kid/accept', async (ctx) => {
+    const a = authed(ctx); if (!allow('aikey:' + a.sub, 20, 3600e3)) throw new HttpError(429, 'Nhận AI key quá nhiều lần, thử lại sau', 'RATE');
+    return { ok: true, ...(await content.acceptKeyShare(a.sub, String(ctx.body.ownerId || ctx.query.get('id') || ''), ctx.params.kid)) };
+  }, { status: 201 });
   router.post('/api/ai/test', async (ctx) => {
     const a = authed(ctx); if (!allow('aitest:' + a.sub, 20, 3600e3)) throw new HttpError(429, 'Thử kết nối AI quá nhiều lần trong 1 giờ', 'RATE');
     return { ok: true, result: await content.testAi(a.sub, { provider: ctx.body.provider, model: ctx.body.model }) };

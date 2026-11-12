@@ -9,6 +9,7 @@
        POST /api/quiz/submissions/:id/analyze   { aiKeyId, model }
      Nộp bài lưu kết quả TRƯỚC; phân tích AI chỉ bổ sung thêm vào JSON bài nộp.
    ============================================================ */
+import { lockSeek } from "../js/alarmSeekLock.js";
 export function mountQuizTake(CFG, bridge) {
     "use strict";
     var __off = [];
@@ -197,6 +198,8 @@ export function mountQuizTake(CFG, bridge) {
     // ============================================================
     var intentionalStop = false;
     var blockMsgTimer = null;
+    var alarmSeek = el.audio ? lockSeek(el.audio) : null;   // khoá tua chuông
+    function seekReset() { if (alarmSeek) alarmSeek.reset(); }
 
     function canPlayAlarm() { return state.timeUp && !state.submitted && !state.submitting; }
 
@@ -205,6 +208,7 @@ export function mountQuizTake(CFG, bridge) {
         try {
             el.audio.loop = true;
             el.audio.volume = 1.0;
+            seekReset();
             el.audio.currentTime = 0;
             var p = el.audio.play();
             if (p && typeof p.catch === "function") p.catch(function (err) { console.warn("Không tự phát được chuông:", err); });
@@ -213,6 +217,7 @@ export function mountQuizTake(CFG, bridge) {
     function stopAlarm() {
         if (!el.audio) return;
         intentionalStop = true;
+        seekReset();
         try { el.audio.loop = false; el.audio.pause(); el.audio.currentTime = 0; } catch (e) { /* noop */ }
         setTimeout(function () { intentionalStop = false; }, 60);
     }
@@ -243,6 +248,7 @@ export function mountQuizTake(CFG, bridge) {
         el.audio.addEventListener("play", function () {
             if (!canPlayAlarm()) {
                 intentionalStop = true;
+                seekReset();
                 try { el.audio.pause(); el.audio.currentTime = 0; } catch (e) { /* noop */ }
                 setTimeout(function () { intentionalStop = false; }, 60);
                 showBlockedAudioMessage();

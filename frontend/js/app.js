@@ -1,5 +1,6 @@
 import { API, session, on, ping, logout, imageCtx, nextPage } from './api.js';
 import { h, toast, spinner, errorBox, logo } from './ui.js';
+import { themeToggle } from './theme.js';
 import { loginPage } from './pages/auth.js';
 import { homePage, historyPage } from './pages/home.js';
 import { essayEditor } from './pages/editors.js';
@@ -9,6 +10,7 @@ import { submissionPage } from './pages/submission.js';
 import { settingsPage, aiSettingsPage } from './pages/settings.js';
 import { promptsPage, promptEditorPage } from './pages/prompts.js';
 import { itemHistoryPage } from './pages/itemHistory.js';
+import { aiKeyLinkPage } from './pages/settings.js';
 import { sharePage, sharePlayPage, shareHistoryPage, lessonLinkPage } from './pages/share.js';
 import { appsPage, flashcardsHubPage, flashcardEditorPage, flashcardStudyPage } from './pages/flashcards.js';
 
@@ -39,6 +41,7 @@ const routes = [
   [/^\/s\/([a-f0-9_]+)\/play$/, (c, m) => sharePlayPage(c, m[1])],
   [/^\/s\/([a-f0-9_]+)\/history$/, (c, m) => shareHistoryPage(c, m[1])],
   [/^\/lessons\/([a-f0-9_]+)\/(share|history|play)$/, lessonLinkPage],
+  [/^\/ai-key\/([a-z][a-z0-9_-]{1,31})$/, aiKeyLinkPage],     // link chia sẻ AI key: #/ai-key/<id-ai-key>?id=<id-user>
 ];
 
 const app = document.getElementById('app'), top = document.getElementById('top'), conn = document.getElementById('conn');
@@ -55,7 +58,7 @@ function renderTop() {
     h('a', { class: 'brand', href: '#/' }, logo(), h('div', null, h('b', null, 'Tự luyện thi của mnha'))),
     s ? h('nav', null,
       link('#/', 'Bài của tôi'), link('#/apps', 'Ứng dụng'), link('#/history', 'Lịch sử'), link('#/prompts', 'Prompt AI'), link('#/settings', 'Cài đặt'),
-      h('span', { class: 'me' }, h('span', { class: 'avatar' }, (s.user.email || s.user.displayName || s.user.username || '?').trim().charAt(0).toUpperCase()),
+      h('span', { class: 'me' }, themeToggle(), h('span', { class: 'avatar' }, (s.user.email || s.user.displayName || s.user.username || '?').trim().charAt(0).toUpperCase()),
         h('span', { class: 'who', title: s.user.email || s.user.username }, s.user.email || s.user.username),   // email đăng nhập; tài khoản cũ chưa có email thì hiện tên đăng nhập
         h('button', { class: 'btn small ghost', onclick: async () => { await logout(); go('/login'); } }, 'Đăng xuất'))) : null,
   );
@@ -71,7 +74,7 @@ async function render() {
   renderTop();
   if (!route) { app.replaceChildren(h('div', { class: 'card' }, h('h2', null, 'Không tìm thấy trang'), h('a', { class: 'btn', href: '#/' }, 'Về trang chủ'))); return; }
   imageCtx.share = null;                           // mỗi trang tự đặt lại nếu đang xem bài chia sẻ
-  if (!route[2] || !route[2].guest) { if (!s) { if (/^\/(s|lessons)\//.test(path)) nextPage.save(raw); return go('/login'); } }   // link chia sẻ: bắt đăng nhập rồi quay lại đúng bài
+  if (!route[2] || !route[2].guest) { if (!s) { if (/^\/(s|lessons|ai-key)\//.test(path)) nextPage.save(raw); return go('/login'); } }   // link chia sẻ: bắt đăng nhập rồi quay lại đúng bài
   else if (s) return go(nextPage.take() || '/');
   app.classList.remove('wide'); app.replaceChildren(spinner());
   const ctx = { query: new URLSearchParams(qs || ''), setCleanup: (f) => { cleanup = f; }, go, isCurrent: () => token === navToken };
@@ -79,10 +82,10 @@ async function render() {
     const node = await route[1](ctx, route[0].exec(path));
     if (token !== navToken) return;
     app.replaceChildren(node); window.scrollTo(0, 0);
-    app.classList.toggle('wide', !!(node && node.querySelector && node.querySelector('.exam-page, .ep-page')));   // trang làm bài rộng như luyen-thi
+    app.classList.toggle('wide', !!(node && node.querySelector && node.querySelector('.exam-page, .lesson-page')));   // trang làm bài rộng như luyen-thi
   } catch (e) {
     if (token !== navToken) return;
-    if (e.status === 401) { session.clear(); if (/^\/(s|lessons)\//.test(path)) nextPage.save(raw); return go('/login'); }
+    if (e.status === 401) { session.clear(); if (/^\/(s|lessons|ai-key)\//.test(path)) nextPage.save(raw); return go('/login'); }
     app.classList.remove('wide'); app.replaceChildren(errorBox(e, render));
   }
 }

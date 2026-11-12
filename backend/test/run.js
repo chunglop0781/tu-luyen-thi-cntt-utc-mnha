@@ -801,7 +801,52 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.equal((await call('POST', '/api/auth/login', { raw: JSON.stringify({ a: 'x'.repeat(1100000) }), headers: { 'Content-Type': 'application/json' } })).status, 413);
   });
 
+  await t('chia sẻ AI key: người nhận có createdBy, không chia sẻ lại được, không lộ key', async () => {
+    const tk = (U) => ({ token: U.accessToken });
+    const C = await reg('keyowner'), D = await reg('keyguest');
+    // Carol thêm nhà 'deepseek' + key; chưa bật chia sẻ → 404 cho người khác
+    assert.equal((await call('POST', '/api/ai/providers', { ...tk(C), body: { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', chatPath: '/chat/completions', models: 'deepseek-chat' } })).status, 201);
+    assert.equal((await call('PUT', '/api/me/vault', { ...tk(C), body: { providers: { deepseek: { key: 'sk-carol-secret-1', name: 'Key của Carol' } } } })).status, 200);
+    assert.equal((await call('GET', `/api/ai-key/deepseek?id=${C.user.id}`, tk(D))).status, 404);
+    assert.equal((await call('POST', '/api/ai-key/deepseek/accept', { ...tk(D), body: { ownerId: C.user.id } })).status, 404);
+    // không có key thì không bật chia sẻ được; người khác không bật hộ được
+    assert.equal((await call('POST', '/api/ai-key/gemini/share', { ...tk(C), body: { enabled: true } })).status, 400);
+    assert.equal((await call('POST', '/api/ai-key/deepseek/share', { ...tk(D), body: { enabled: true } })).status, 404);
+    const sh = await call('POST', '/api/ai-key/deepseek/share', { ...tk(C), body: { enabled: true } }); assert.equal(sh.status, 200); assert.equal(sh.json.path, `/ai-key/deepseek?id=${C.user.id}`);
+    // xem trước: không lộ key
+    const pv = await call('GET', `/api/ai-key/deepseek?id=${C.user.id}`, tk(D)); assert.equal(pv.status, 200); assert.equal(pv.json.key.createdBy, C.user.id); assert.ok(!JSON.stringify(pv.json).includes('sk-carol-secret-1'));
+    assert.equal((await call('GET', `/api/ai-key/deepseek?id=${C.user.id}`)).status, 401);
+    // chủ key tự nhận → bị chặn
+    assert.equal((await call('POST', '/api/ai-key/deepseek/accept', { ...tk(C), body: { ownerId: C.user.id } })).status, 400);
+    // Dave nhận
+    const ac = await call('POST', '/api/ai-key/deepseek/accept', { ...tk(D), body: { ownerId: C.user.id } }); assert.equal(ac.status, 201, JSON.stringify(ac.json)); assert.equal(ac.json.createdBy, C.user.id);
+    const dp = (await call('GET', '/api/ai/providers', tk(D))).json.providers.find((x) => x.id === ac.json.id); assert.equal(dp.createdBy, C.user.id); assert.equal(dp.shared, false);
+    const dv = (await call('GET', '/api/me/vault', tk(D))).json.vault; assert.equal(dv.items[ac.json.id].keySet, true); assert.equal(dv.items[ac.json.id].createdBy, C.user.id); assert.ok(!JSON.stringify(dv).includes('sk-carol-secret-1'));
+    // key lưu mã hoá (không lộ ở repo) và dùng được để gọi AI
+    assert.ok(!gh.file('tu-luyen-thi-cntt-utc-mnha-account', `private/${D.user.id}/vault.json`).toString().includes('sk-carol-secret-1'));
+    const n0 = aiCalls.length; assert.equal((await call('POST', '/api/ai/test', { ...tk(D), body: { provider: ac.json.id } })).status, 200); assert.equal(aiCalls[n0].headers.Authorization || aiCalls[n0].headers.authorization, 'Bearer sk-carol-secret-1');
+    // ★ Dave KHÔNG chia sẻ lại được
+    assert.equal((await call('POST', `/api/ai-key/${ac.json.id}/share`, { ...tk(D), body: { enabled: true } })).status, 403);
+    assert.equal((await call('GET', `/api/ai-key/${ac.json.id}?id=${D.user.id}`, tk(C))).status, 404);
+    // Dave không đổi được địa chỉ API của key nhận (tránh chuyển key ra ngoài)
+    const ed = await call('PUT', `/api/ai/providers/${ac.json.id}`, { ...tk(D), body: { label: 'Đổi tên', baseUrl: 'https://evil.example.com', chatPath: '/steal' } }); assert.equal(ed.status, 200);
+    assert.equal(ed.json.provider.baseUrl, 'https://api.deepseek.com'); assert.equal(ed.json.provider.chatPath, '/chat/completions');
+    // Nhận lại lần nữa = làm mới key, không tạo thêm nhà
+    const cnt = (await call('GET', '/api/ai/providers', tk(D))).json.providers.length;
+    assert.equal((await call('POST', '/api/ai-key/deepseek/accept', { ...tk(D), body: { ownerId: C.user.id } })).status, 201);
+    assert.equal((await call('GET', '/api/ai/providers', tk(D))).json.providers.length, cnt);
+    // Carol tắt chia sẻ → người mới không nhận được nữa
+    assert.equal((await call('POST', '/api/ai-key/deepseek/share', { ...tk(C), body: { enabled: false } })).status, 200);
+    const E = await reg('keyother'); assert.equal((await call('GET', `/api/ai-key/deepseek?id=${C.user.id}`, tk(E))).status, 404);
+    // Dave dán key riêng → thành key của Dave (hết createdBy) và chia sẻ được
+    assert.equal((await call('PUT', '/api/me/vault', { ...tk(D), body: { providers: { [ac.json.id]: { key: 'sk-dave-own-key-1' } } } })).status, 200);
+    assert.equal((await call('POST', `/api/ai-key/${ac.json.id}/share`, { ...tk(D), body: { enabled: true } })).status, 200);
+    // Xoá nhà cung cấp dọn dấu chia sẻ
+    assert.equal((await call('DELETE', '/api/ai/providers/deepseek', tk(C))).status, 200);
+  });
+
   srv.close();
+
   console.log(`\n${passed} đạt, ${failed} lỗi`);
   process.exit(failed ? 1 : 0);
 })();
