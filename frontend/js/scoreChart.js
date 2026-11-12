@@ -88,6 +88,7 @@ export function scoreChart({ isOwner, points = [], onOpen }) {
     if (isOwner) lines.push(h('b', null, p.n || '(không rõ tên)'));
     else lines.push(p.m ? h('b', null, 'Bài của bạn') : h('span', null, h('b', null, 'Bạn khác'), ' (ẩn danh)'));
     lines.push(h('span', null, 'Điểm: ', h('b', null, `${fmtNum(p.raw)}/${p.max}`), p.max !== 10 ? ` (quy đổi ${fmtNum(p.s)}/10)` : ''));
+    if (isOwner && p.by) lines.push(h('span', null, 'Chấm bởi: ', h('b', null, p.by)));
     lines.push(h('span', null, fmtDateTime(p.t)));
     if (p.id) lines.push(h('span', { class: 'hc-dim' }, 'Bấm để xem chi tiết'));
     tip.replaceChildren(...lines.flatMap((l, i) => (i ? [h('br'), l] : [l])));

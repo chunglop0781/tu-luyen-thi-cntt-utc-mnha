@@ -218,7 +218,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
       return s;
     }, { message: `grade ${id}` });
     if (next.score != null) await patchIndexSub(uid, id, next.score, next.max);
-    if (next.inShare && next.score != null) await setResultScore(next.inShare, { id, uid, n: '', at: next.submittedAt, score: next.score, max: next.max }).catch(() => {});
+    if (next.inShare && next.score != null) await setResultScore(next.inShare, { id, uid, n: '', at: next.submittedAt, score: next.score, max: next.max, by: aiBy(next.ai) }).catch(() => {});
     return next;
   }
 
@@ -273,7 +273,7 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
     const next = await store.update('data', subPath(uid, id), (s) => { if (shared && s.ai) throw already(); s.ai = ai; if (s.selfScore == null) s.score = ai.score; return s; }, { message: `ai-grade ${id}` });
     if (next.score != null) await patchIndexSub(uid, id, next.score, next.max);
     const sidOut = shared || (next.inShare && isId(next.inShare) ? next.inShare : null);   // bài qua link HOẶC bài của chủ bài đã vào lịch sử chia sẻ
-    if (sidOut && next.score != null) await setResultScore(sidOut, { id, uid, n: String(wanted.studentName || '').slice(0, 60), at: next.submittedAt, score: next.score, max: next.max });
+    if (sidOut && next.score != null) await setResultScore(sidOut, { id, uid, n: String(wanted.studentName || '').slice(0, 60), at: next.submittedAt, score: next.score, max: next.max, by: aiBy(next.ai) });
     return next;
   }
 
@@ -411,12 +411,13 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   }
 
   /** Cập nhật điểm của một lượt nộp trên biểu đồ chung (khi AI chấm xong bài tự luận); chưa có dòng thì thêm. */
+  const aiBy = (ai) => String((ai && (ai.keyName || ai.model)) || '').slice(0, 80);   // "Chấm bởi" trên biểu đồ
   async function setResultScore(sid, entry) {
     await store.update('data', sharePath(sid), (d) => {
       if (!d) return undefined;
       d.results = d.results || [];
       const r = d.results.find((x) => x.id === entry.id && x.uid === entry.uid);
-      if (r) { r.score = entry.score; r.max = entry.max; if (!r.n && entry.n) r.n = entry.n; }
+      if (r) { r.score = entry.score; r.max = entry.max; if (!r.n && entry.n) r.n = entry.n; if (entry.by) r.by = entry.by; }
       else d.results.push(entry);
       if (d.results.length > MAX_SHARE_RESULTS) d.results = d.results.slice(-MAX_SHARE_RESULTS);
       return d;
@@ -486,12 +487,21 @@ function createContent({ cfg, store, images, fetchImpl, lookup }) {
   async function sharedHistory(uid, sid, nameFn) {
     let { doc, isOwner } = await loadShare(sid, uid);
     if (isOwner && nameFn && await backfillOwner(uid, doc, nameFn).catch(() => false)) ({ doc, isOwner } = await loadShare(sid, uid));
+    if (isOwner) {   // điểm cũ chưa ghi "chấm bởi" → đọc từ bài nộp rồi lưu lại (tối đa 30 bài mỗi lần)
+      const need = (doc.results || []).filter((r) => r && r.score != null && r.by === undefined && isId(r.uid)).slice(0, 30);
+      if (need.length) {
+        const got = new Map();
+        await mapLimit(need, 5, async (r) => { try { got.set(r.id, aiBy((await getSubmission(r.uid, r.id)).ai)); } catch { got.set(r.id, ''); } });
+        await store.update('data', sharePath(sid), (d) => { if (!d) return undefined; for (const r of d.results || []) if (r && got.has(r.id) && r.by === undefined) r.by = got.get(r.id); return d; }, { message: `share ${sid}` }).catch(() => {});
+        for (const r of need) r.by = got.get(r.id);
+      }
+    }
     const allResults = (doc.results || []).filter(Boolean);
     const visible = allResults.filter((r) => isOwner || r.uid === uid);
     const points = visible.filter((r) => r.score != null).map((r) => {
       const t = Date.parse(r.at); const max = Number(r.max) || 10, raw = Number(r.score);
       const pt = { t, s: round2(Math.max(0, Math.min(10, (raw / max) * 10))), raw, max, q: shareType(doc) === 'quiz' ? 1 : 0, m: r.uid === uid ? 1 : 0, id: r.id };
-      if (isOwner) pt.n = r.n || '';
+      if (isOwner) { pt.n = r.n || ''; if (r.by) pt.by = r.by; }
       return pt;
     }).filter((p) => !Number.isNaN(p.t)).sort((a, b) => a.t - b.t).slice(-5000);
     const rows = visible.map((r) => ({ id: r.id, m: r.uid === uid ? 1 : 0, n: isOwner ? r.n : undefined, at: r.at, score: r.score == null ? null : r.score, max: r.max })).sort((a, b) => String(b.at).localeCompare(String(a.at)));
