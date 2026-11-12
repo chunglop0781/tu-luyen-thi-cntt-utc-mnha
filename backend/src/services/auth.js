@@ -166,7 +166,7 @@ function createAuth({ cfg, store, mailer }) {
 
   /** Đăng nhập bằng TÊN ĐĂNG NHẬP hoặc EMAIL (body.identifier; vẫn nhận body.username cho bản cũ). */
   async function login(body, ua) {
-    const raw = String((body && (body.identifier !== undefined ? body.identifier : body.username)) || '').trim().toLowerCase();
+    const raw = String((body && (body.identifier !== undefined ? body.identifier : body.username)) || '').trim().toLowerCase().slice(0, 254);
     const password = body && body.password;
     let key = raw;
     if (raw.includes('@')) {                                  // email → tra chỉ mục emails/<hash>.json ra tên đăng nhập
@@ -174,7 +174,7 @@ function createAuth({ cfg, store, mailer }) {
       key = idx ? idx.data.username : '';
     }
     const rec = USERNAME_RE.test(key) ? await store.read('account', userPath(key), { fresh: true }) : null;
-    const ok = await bcrypt.compare(String(password || ''), rec ? rec.data.hash : dummyHash);
+    const ok = await bcrypt.compare(String(password || '').slice(0, 72), rec ? rec.data.hash : dummyHash);   // bcrypt chỉ đọc 72 byte đầu; cắt để khỏi tốn CPU vô ích
     if (!rec || !ok) throw new HttpError(401, 'Sai tên đăng nhập/email hoặc mật khẩu', 'BAD_CREDENTIALS');
     return issue(rec.data, ua);
   }
@@ -198,14 +198,14 @@ function createAuth({ cfg, store, mailer }) {
 
   async function logout(refreshToken) {
     const p = jwtVerify(refreshToken, cfg.jwtSecret);
-    if (!p) return;
+    if (!p || p.typ !== 'refresh') return;
     await store.update('account', sessionPath(p.sub), (cur) => (cur ? { sessions: cur.sessions.filter((s) => s.sid !== p.sid) } : undefined), { message: `logout ${p.sub}` });
   }
 
   async function changePassword(auth, { oldPassword, newPassword }) {
     checkPassword(newPassword);
     const rec = await store.read('account', userPath(auth.un), { fresh: true });
-    if (!rec || !(await bcrypt.compare(String(oldPassword || ''), rec.data.hash))) throw new HttpError(401, 'Mật khẩu hiện tại không đúng', 'BAD_CREDENTIALS');
+    if (!rec || !(await bcrypt.compare(String(oldPassword || '').slice(0, 72), rec.data.hash))) throw new HttpError(401, 'Mật khẩu hiện tại không đúng', 'BAD_CREDENTIALS');
     const hash = await bcrypt.hash(newPassword, cfg.bcryptRounds);
     await store.update('account', userPath(auth.un), (u) => ({ ...u, hash }), { message: `password ${auth.sub}` });
     await revoke(auth.sub, auth.sid);
@@ -229,7 +229,7 @@ function createAuth({ cfg, store, mailer }) {
     return ((s && s.data.sessions) || []).map((x) => ({ id: sha256Hex(x.sid).slice(0, 8), current: x.sid === auth.sid, ua: x.ua, createdAt: x.createdAt, exp: x.exp }));
   }
 
-  /** Xác thực access token → { sub, un, sid } hoặc ném 401. */
+  /** Xác thực access token → { sub, un, sid } hoặc ném 401. Chỉ kiểm tra chữ ký + hạn (không tra phiên). */
   function authenticate(req) {
     const h = String(req.headers.authorization || '');
     const p = h.startsWith('Bearer ') ? jwtVerify(h.slice(7), cfg.jwtSecret) : null;
@@ -237,7 +237,17 @@ function createAuth({ cfg, store, mailer }) {
     return p;
   }
 
-  return { register, registerStart, registerVerify, resetStart, resetConfirm, login, refresh, logout, revoke, changePassword, updateProfile, me, sessions, authenticate };
+  /** Như authenticate nhưng phiên (sid) phải CÒN trong sessions/<uid>.json — dùng cho thao tác nhạy cảm (key, mật khẩu).
+   *  Nhờ vậy đăng xuất / đổi mật khẩu / đăng xuất mọi nơi vô hiệu hoá access token cũ ngay thay vì đợi hết hạn (mặc định 60 phút). */
+  async function authenticateLive(req) {
+    const p = authenticate(req);
+    const s = await store.read('account', sessionPath(p.sub), { fresh: true });
+    const now = Math.floor(Date.now() / 1000);
+    if (!s || !((s.data && s.data.sessions) || []).some((x) => x.sid === p.sid && x.exp > now)) throw new HttpError(401, 'Phiên đã bị thu hồi, hãy đăng nhập lại', 'SESSION_REVOKED');
+    return p;
+  }
+
+  return { register, registerStart, registerVerify, resetStart, resetConfirm, login, refresh, logout, revoke, changePassword, updateProfile, me, sessions, authenticate, authenticateLive };
 }
 
 module.exports = { createAuth, USERNAME_RE };

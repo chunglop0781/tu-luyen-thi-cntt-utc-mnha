@@ -129,16 +129,22 @@
                 if (!q) return true;
                 return !it.placeholder && it.norm.indexOf(q) !== -1;
             });
+            // data-sp-custom: gõ tên không có trong danh sách → thêm mục "Dùng …" để nhập tay (vd. model tự đặt)
+            var raw = search.value.trim();
+            if ("spCustom" in ds && q && raw.length <= 100 && !/[\u0000-\u001f<>"']/.test(raw) &&
+                !items.some(function (it) { return !it.placeholder && it.value.toLowerCase() === raw.toLowerCase(); })) {
+                shown.push({ value: raw, label: raw, norm: q, custom: true });
+            }
             var html = "";
             shown.forEach(function (it, idx) {
                 var sel = it.value === select.value;
-                html += '<li class="sp-item' + (sel ? " sp-selected" : "") + '" role="option" data-i="' + idx +
+                html += '<li class="sp-item' + (sel ? " sp-selected" : "") + (it.custom ? " sp-custom" : "") + '" role="option" data-i="' + idx +
                     '" aria-selected="' + sel + '" title="' + esc(it.label) + '"><span class="sp-item-text">' +
-                    highlight(it.label, q) + "</span>" + CHECK + "</li>";
+                    (it.custom ? '✏️ Dùng “' + esc(it.label) + '” (nhập tay)' : highlight(it.label, q)) + "</span>" + CHECK + "</li>";
             });
             if (!shown.length) html = '<li class="sp-empty">' + esc(T.empty) + '</li>';
             list.innerHTML = html;
-            var real = shown.filter(function (s) { return !s.placeholder; }).length;
+            var real = shown.filter(function (s) { return !s.placeholder && !s.custom; }).length;
             var total = items.filter(function (s) { return !s.placeholder; }).length;
             count.textContent = q ? real + " / " + total + " " + T.unitShort + " khớp" : total + " " + T.unit;
             // mục đang chọn (nếu có) làm mục active, không thì mục đầu tiên
@@ -165,6 +171,11 @@
         function choose(i) {
             var it = shown[i];
             if (!it) return;
+            if (it.custom && !Array.prototype.some.call(select.options, function (o) { return o.value === it.value; })) {
+                var op = document.createElement("option");
+                op.value = it.value; op.textContent = it.value;
+                select.appendChild(op);
+            }
             var changed = select.value !== it.value;
             select.value = it.value;
             syncButton();

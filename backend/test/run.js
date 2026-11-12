@@ -855,6 +855,61 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     assert.equal((await call('DELETE', '/api/ai/providers/deepseek', tk(C))).status, 200);
   });
 
+  console.log('Phiên đăng nhập & nơi lưu key');
+  await t('đăng xuất / đăng xuất mọi nơi / đổi mật khẩu: access token cũ KHÔNG còn ghi được key (thao tác nhạy cảm), dù chưa hết hạn', async () => {
+    const X = await reg('livesess');                                                  // phiên 1
+    const Y = (await call('POST', '/api/auth/login', { body: { username: 'livesess', password: 'matkhau123' } })).json;   // phiên 2
+    const Z = (await call('POST', '/api/auth/login', { body: { username: 'livesess', password: 'matkhau123' } })).json;   // phiên 3
+    const put = (tok) => call('PUT', '/api/me/vault', { token: tok, body: { notes: 'ghi chú' } });
+    assert.equal((await put(X.accessToken)).status, 200);
+    await call('POST', '/api/auth/logout', { body: { refreshToken: X.refreshToken } });
+    assert.equal((await put(X.accessToken)).status, 401);
+    assert.equal((await put(X.accessToken)).json.code, 'SESSION_REVOKED');
+    assert.equal((await call('GET', '/api/me', { token: X.accessToken })).status, 200);   // đọc thường vẫn theo hạn token (không tra phiên)
+    assert.equal((await put(Y.accessToken)).status, 200);                                  // phiên khác không bị ảnh hưởng
+    // đổi mật khẩu bằng phiên Y → phiên Z bị thu hồi ngay
+    assert.equal((await call('POST', '/api/auth/change-password', { token: Y.accessToken, body: { oldPassword: 'matkhau123', newPassword: 'matkhau-moi-789' } })).status, 200);
+    assert.equal((await put(Z.accessToken)).status, 401);
+    assert.equal((await put(Y.accessToken)).status, 200);
+    // đăng xuất mọi nơi → phiên Y cũng hết hiệu lực
+    assert.equal((await call('POST', '/api/auth/logout-all', { token: Y.accessToken })).status, 200);
+    assert.equal((await put(Y.accessToken)).status, 401);
+    assert.equal((await call('POST', '/api/auth/logout-all', { token: Y.accessToken })).status, 401);   // token đã thu hồi không dùng lại được
+  });
+  await t('token đã thu hồi cũng không chia sẻ / nhận / thử AI key được', async () => {
+    const X = await reg('livekey'); const Y = (await call('POST', '/api/auth/login', { body: { username: 'livekey', password: 'matkhau123' } })).json;
+    await call('POST', '/api/auth/logout', { body: { refreshToken: X.refreshToken } });
+    for (const [m, path, body] of [['POST', '/api/ai-key/gemini/share', { enabled: true }], ['GET', '/api/ai-key/gemini?id=abc', undefined], ['POST', '/api/ai-key/gemini/accept', { ownerId: 'abc' }], ['POST', '/api/ai/test', { provider: 'gemini' }], ['POST', '/api/ai/providers', { label: 'x' }]]) {
+      const r = await call(m, path, { token: X.accessToken, body }); assert.equal(r.status, 401, path); assert.equal(r.json.code, 'SESSION_REVOKED', path);
+    }
+    assert.notEqual((await call('POST', '/api/ai-key/gemini/share', { token: Y.accessToken, body: { enabled: true } })).status, 401);   // phiên còn sống thì qua được bước xác thực
+  });
+  await t('đăng nhập thiếu/ sai kiểu identifier → 401 (không 500), chuỗi quá dài vẫn xử lý được', async () => {
+    const h = { 'X-Vercel-Forwarded-For': '198.51.100.7' };      // IP riêng để không dính hạn mức đăng nhập của các test trước
+    assert.equal((await call('POST', '/api/auth/login', { body: { password: 'matkhau123' }, headers: h })).status, 401);
+    assert.equal((await call('POST', '/api/auth/login', { body: { identifier: 12345, password: 'x' }, headers: h })).status, 401);
+    assert.equal((await call('POST', '/api/auth/login', { body: { identifier: 'a'.repeat(5000), password: 'x'.repeat(5000) }, headers: h })).status, 401);
+  });
+  await t('đổi mật khẩu bị giới hạn lần thử (chống dò mật khẩu cũ bằng token bị lộ)', async () => {
+    const X = await reg('chpwlimit'); let last = 0;
+    for (let i = 0; i < 12; i++) last = (await call('POST', '/api/auth/change-password', { token: X.accessToken, body: { oldPassword: 'sai-mat-khau', newPassword: 'matkhau-moi-123' } })).status;
+    assert.equal(last, 429);
+  });
+  await t('x-forwarded-for do khách tự gửi KHÔNG né được giới hạn đăng nhập (đổi IP giả mỗi lần vẫn bị 429)', async () => {
+    const real = { 'X-Vercel-Forwarded-For': '198.51.100.8' }; const codes = [];   // IP thật (Vercel đặt) cố định, khách chỉ đổi x-forwarded-for
+    for (let i = 0; i < 30; i++) codes.push((await call('POST', '/api/auth/login', { body: { username: 'user' + i, password: 'matkhau123' }, headers: { ...real, 'X-Forwarded-For': `10.1.${i}.${i}, 203.0.113.9` } })).status);
+    assert.ok(codes.slice(0, 20).every((c) => c === 401), 'còn trong hạn mức thì phải là 401: ' + codes.join(','));
+    assert.ok(codes.slice(20).every((c) => c === 429), 'vượt hạn mức dù đổi IP giả: ' + codes.join(','));
+    // không có header Vercel: lấy phần tử CUỐI của x-forwarded-for (do proxy thêm), đổi phần tử đầu vẫn cùng một khách
+    const c2 = []; for (let i = 0; i < 30; i++) c2.push((await call('POST', '/api/auth/login', { body: { username: 'other' + i, password: 'matkhau123' }, headers: { 'X-Forwarded-For': `10.2.${i}.${i}, 203.0.113.50` } })).status);
+    assert.ok(c2.slice(20).every((c) => c === 429), c2.join(','));
+  });
+  await t('JWT_SECRET trùng ENCRYPTION_KEY bị báo lỗi cấu hình', async () => {
+    const { config, problems } = require('../src/config');
+    assert.ok(problems(config({ ...env, ENCRYPTION_KEY: env.JWT_SECRET })).some((x) => /trùng/.test(x)));
+    assert.ok(!problems(config(env)).some((x) => /trùng/.test(x)));
+  });
+
   srv.close();
 
   console.log(`\n${passed} đạt, ${failed} lỗi`);

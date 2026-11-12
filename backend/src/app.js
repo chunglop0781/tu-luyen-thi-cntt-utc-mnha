@@ -41,9 +41,13 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   const allow = limiter();
   const router = new Router();
 
-  const ip = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  // IP thật của khách: Vercel tự ghi đè x-vercel-forwarded-for / x-real-ip (khách không giả được).
+  // KHÔNG tin phần tử ĐẦU của x-forwarded-for (khách tự gửi → giả IP để né giới hạn đăng nhập); nếu phải dùng thì lấy phần tử CUỐI (do proxy gần nhất thêm).
+  const ip = (req) => String(req.headers['x-vercel-forwarded-for'] || req.headers['x-real-ip'] || String(req.headers['x-forwarded-for'] || '').split(',').pop() || req.socket.remoteAddress || '').split(',')[0].trim().slice(0, 64);
   const ua = (req) => String(req.headers['user-agent'] || '');
   const authed = (ctx) => auth.authenticate(ctx.req);
+  // Thao tác nhạy cảm (key, mật khẩu, phiên): token phải CÒN phiên — đăng xuất / đổi mật khẩu / "đăng xuất mọi nơi" có hiệu lực ngay, không đợi access token hết hạn.
+  const authedLive = (ctx) => auth.authenticateLive(ctx.req);
 
   // ── Hệ thống ──
   router.get('/api/health', async (ctx) => {
@@ -81,33 +85,40 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
     await auth.resetConfirm(ctx.body); return { ok: true };
   });
   router.post('/api/auth/login', async (ctx) => {
-    if (!allow('login:' + ip(ctx.req), 20, 600e3) || !allow('loginu:' + String(ctx.body.identifier !== undefined ? ctx.body.identifier : ctx.body.username).trim().toLowerCase(), 10, 600e3)) throw new HttpError(429, 'Thử đăng nhập quá nhiều lần, đợi vài phút', 'RATE');
+    if (!allow('login:' + ip(ctx.req), 20, 600e3) || !allow('loginu:' + String(ctx.body.identifier !== undefined ? ctx.body.identifier : ctx.body.username || '').trim().toLowerCase().slice(0, 254), 10, 600e3)) throw new HttpError(429, 'Thử đăng nhập quá nhiều lần, đợi vài phút', 'RATE');
     return { ok: true, ...(await auth.login(ctx.body, ua(ctx.req))) };
   });
   router.post('/api/auth/refresh', async (ctx) => ({ ok: true, ...(await auth.refresh(ctx.body.refreshToken)) }));
   router.post('/api/auth/logout', async (ctx) => { await auth.logout(ctx.body.refreshToken); return { ok: true }; });
-  router.post('/api/auth/logout-all', async (ctx) => { const a = authed(ctx); await auth.revoke(a.sub, null); return { ok: true }; });
-  router.post('/api/auth/change-password', async (ctx) => { await auth.changePassword(authed(ctx), ctx.body); return { ok: true }; });
+  router.post('/api/auth/logout-all', async (ctx) => { const a = await authedLive(ctx); await auth.revoke(a.sub, null); return { ok: true }; });
+  router.post('/api/auth/change-password', async (ctx) => {
+    const a = await authedLive(ctx);
+    if (!allow('chpw:' + a.sub, 8, 600e3)) throw new HttpError(429, 'Đổi mật khẩu quá nhiều lần, đợi vài phút', 'RATE');   // chống dò mật khẩu cũ bằng token bị lộ
+    await auth.changePassword(a, ctx.body); return { ok: true };
+  });
   router.get('/api/me', async (ctx) => ({ ok: true, user: await auth.me(authed(ctx)) }));
   router.patch('/api/me', async (ctx) => ({ ok: true, user: await auth.updateProfile(authed(ctx), ctx.body) }));
-  router.get('/api/me/sessions', async (ctx) => ({ ok: true, sessions: await auth.sessions(authed(ctx)) }));
+  router.get('/api/me/sessions', async (ctx) => ({ ok: true, sessions: await auth.sessions(await authedLive(ctx)) }));
   router.get('/api/me/vault', async (ctx) => ({ ok: true, vault: await content.readVault(authed(ctx).sub) }));
-  router.put('/api/me/vault', async (ctx) => ({ ok: true, vault: await content.writeVault(authed(ctx).sub, ctx.body) }));
+  router.put('/api/me/vault', async (ctx) => ({ ok: true, vault: await content.writeVault((await authedLive(ctx)).sub, ctx.body) }));
 
   // ── AI: danh sách nhà cung cấp/model + thử kết nối bằng key của chính người dùng ──
   router.get('/api/ai/providers', async (ctx) => ({ ok: true, ...(await content.aiProviders(authed(ctx).sub)) }));
-  router.post('/api/ai/providers', async (ctx) => ({ ok: true, provider: await content.saveProvider(authed(ctx).sub, null, ctx.body) }), { status: 201 });
-  router.put('/api/ai/providers/:id', async (ctx) => ({ ok: true, provider: await content.saveProvider(authed(ctx).sub, ctx.params.id, ctx.body) }));
-  router.delete('/api/ai/providers/:id', async (ctx) => { await content.deleteProvider(authed(ctx).sub, ctx.params.id); return { ok: true }; });
+  router.post('/api/ai/providers', async (ctx) => ({ ok: true, provider: await content.saveProvider((await authedLive(ctx)).sub, null, ctx.body) }), { status: 201 });
+  router.put('/api/ai/providers/:id', async (ctx) => ({ ok: true, provider: await content.saveProvider((await authedLive(ctx)).sub, ctx.params.id, ctx.body) }));
+  router.delete('/api/ai/providers/:id', async (ctx) => { await content.deleteProvider((await authedLive(ctx)).sub, ctx.params.id); return { ok: true }; });
   // ── Chia sẻ AI key (link: /ai-key/<id-ai-key>?id=<id-user>). Key nhận về có createdBy nên không chia sẻ lại được ──
-  router.post('/api/ai-key/:kid/share', async (ctx) => ({ ok: true, ...(await content.setKeyShare(authed(ctx).sub, ctx.params.kid, ctx.body.enabled !== false)) }));
-  router.get('/api/ai-key/:kid', async (ctx) => ({ ok: true, ...(await content.previewKeyShare(authed(ctx).sub, ctx.query.get('id') || '', ctx.params.kid)) }));
+  router.post('/api/ai-key/:kid/share', async (ctx) => ({ ok: true, ...(await content.setKeyShare((await authedLive(ctx)).sub, ctx.params.kid, ctx.body.enabled !== false)) }));
+  router.get('/api/ai-key/:kid', async (ctx) => {
+    const a = await authedLive(ctx); if (!allow('aikeyv:' + a.sub, 60, 3600e3)) throw new HttpError(429, 'Xem link AI key quá nhiều lần, thử lại sau', 'RATE');   // chống dò id người dùng / id key
+    return { ok: true, ...(await content.previewKeyShare(a.sub, ctx.query.get('id') || '', ctx.params.kid)) };
+  });
   router.post('/api/ai-key/:kid/accept', async (ctx) => {
-    const a = authed(ctx); if (!allow('aikey:' + a.sub, 20, 3600e3)) throw new HttpError(429, 'Nhận AI key quá nhiều lần, thử lại sau', 'RATE');
+    const a = await authedLive(ctx); if (!allow('aikey:' + a.sub, 20, 3600e3)) throw new HttpError(429, 'Nhận AI key quá nhiều lần, thử lại sau', 'RATE');
     return { ok: true, ...(await content.acceptKeyShare(a.sub, String(ctx.body.ownerId || ctx.query.get('id') || ''), ctx.params.kid)) };
   }, { status: 201 });
   router.post('/api/ai/test', async (ctx) => {
-    const a = authed(ctx); if (!allow('aitest:' + a.sub, 20, 3600e3)) throw new HttpError(429, 'Thử kết nối AI quá nhiều lần trong 1 giờ', 'RATE');
+    const a = await authedLive(ctx); if (!allow('aitest:' + a.sub, 20, 3600e3)) throw new HttpError(429, 'Thử kết nối AI quá nhiều lần trong 1 giờ', 'RATE');
     return { ok: true, result: await content.testAi(a.sub, { provider: ctx.body.provider, model: ctx.body.model }) };
   });
 
@@ -162,12 +173,12 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   router.put('/api/submissions/:id', async (ctx) => ({ ok: true, submission: await content.submit(authed(ctx).sub, ctx.params.id, ctx.body) }));
   router.patch('/api/submissions/:id', async (ctx) => ({ ok: true, submission: await content.selfGrade(authed(ctx).sub, ctx.params.id, ctx.body) }));
   router.post('/api/submissions/:id/ai-grade', async (ctx) => {
-    const a = authed(ctx); if (!allow('ai:' + a.sub, 15, 3600e3)) throw new HttpError(429, 'Chấm AI quá nhiều lần trong 1 giờ', 'RATE');
+    const a = await authedLive(ctx); if (!allow('ai:' + a.sub, 15, 3600e3)) throw new HttpError(429, 'Chấm AI quá nhiều lần trong 1 giờ', 'RATE');
     const u = await auth.me(a);
     return { ok: true, submission: await content.aiGrade(a.sub, ctx.params.id, { provider: ctx.body.provider, model: ctx.body.model, studentName: u.displayName || u.username }) };
   });
   router.post('/api/submissions/:id/ai-analyze', async (ctx) => {
-    const a = authed(ctx); if (!allow('ai:' + a.sub, 15, 3600e3)) throw new HttpError(429, 'Dùng AI quá nhiều lần trong 1 giờ', 'RATE');
+    const a = await authedLive(ctx); if (!allow('ai:' + a.sub, 15, 3600e3)) throw new HttpError(429, 'Dùng AI quá nhiều lần trong 1 giờ', 'RATE');
     const u = await auth.me(a);
     return { ok: true, submission: await content.aiAnalyze(a.sub, ctx.params.id, { provider: ctx.body.provider, model: ctx.body.model, studentName: u.displayName }) };
   });

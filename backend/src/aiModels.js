@@ -69,6 +69,7 @@ function validateBaseUrl(raw) {
 function validateRegex(src) {
   if (src == null || src === '') return { value: '' };
   const s = String(src); if (s.length > 200) return { error: 'Biểu thức regex quá dài (tối đa 200 ký tự).' };
+  if (/(\([^)]*[+*][^)]*\)|\[[^\]]*\][+*])[+*{]/.test(s)) return { error: 'Regex có lặp lồng nhau (nguy cơ treo máy chủ) — hãy viết đơn giản hơn.' };
   try { new RegExp(s, 'i'); } catch { return { error: `Biểu thức regex không hợp lệ: ${s}` }; }
   return { value: s };
 }

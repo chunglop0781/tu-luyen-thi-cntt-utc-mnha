@@ -45,3 +45,16 @@ Khi cần một màn hình có sẵn ở bản cũ (`views/*.pug`, `public/js/*.
   - Bản nhận được đánh dấu `createdBy: "<id-user>"` (lưu trong `private/<uid>/vault.json` → `createdBy[<id>]`, hiện ra ở `/api/ai/providers` và `/api/me/vault`). Key có `createdBy` **không chia sẻ lại được** (403 `NO_RESHARE`) và không sửa được địa chỉ API (tránh chuyển key ra ngoài). Nếu người nhận dán API key riêng vào thì dấu `createdBy` được gỡ (key đó là của họ).
   - Tắt chia sẻ chỉ chặn người nhận MỚI; bản đã sao chép không bị thu hồi. Key Gemini nhận về luôn thành một mục Gemini riêng (id `gemini-xxxxx`, `kind:'gemini'`) — không đè key Gemini sẵn có của người nhận.
   - Test: `backend/test/run.js` → "chia sẻ AI key…".
+
+## 7. Ô chọn model + bảo mật kết nối AI (bản vá mới)
+- **Model KHÔNG dùng `<input list=datalist>` nữa** (danh sách gốc của trình duyệt là hộp đen, không tìm được). Dùng `modelSelect(p, saved)` trong `js/aiName.js` → `<select>` + `SubjectPicker` có tìm kiếm. Nhà cho phép model tự đặt (`allowCustomModel`) thì thêm `data-sp-custom`: gõ tên lạ → hiện mục "✏️ Dùng “…” (nhập tay)". Đã áp dụng ở Cài đặt AI, trang làm bài tự luận, chấm bài và phân tích. Đọc giá trị vẫn là `modelEl.value`.
+- **SSRF / DNS-rebinding**: nhà kiểu OpenAI gọi qua `safeFetch` (`services/netguard.js`) — kiểm tra IP lúc kết nối thật, không theo chuyển hướng, giới hạn 2MB. Đừng đổi về `fetch` thường.
+- Thông báo lỗi từ nhà cung cấp bị cắt 300 ký tự và che API key (`***`). `subscribeRegex` do người dùng nhập bị từ chối nếu có lặp lồng nhau (ReDoS) và chỉ chạy trên chuỗi ngắn.
+
+## 8. Phiên đăng nhập, IP khách, nơi lưu key (bản vá bảo mật)
+- **`auth.authenticate`** chỉ kiểm tra chữ ký + hạn JWT. **`auth.authenticateLive`** (trong `app.js` gọi qua `authedLive(ctx)`) còn tra `sessions/<uid>.json` xem `sid` còn sống không → đăng xuất / đổi mật khẩu / "đăng xuất mọi nơi" có hiệu lực NGAY, không đợi access token hết hạn (mặc định 60 phút). Dùng `authedLive` cho mọi route đụng tới key hoặc mật khẩu: `PUT /api/me/vault`, `/api/ai/providers*` (POST/PUT/DELETE), `/api/ai-key/*` (share/preview/accept), `/api/ai/test`, chấm/phân tích AI, đổi mật khẩu, đăng xuất mọi nơi, danh sách phiên. Route chỉ đọc dữ liệu thường vẫn dùng `authed` (đỡ tốn một lần đọc GitHub).
+- **IP khách** (`ip(req)` trong `app.js`): ưu tiên `x-vercel-forwarded-for` / `x-real-ip` (Vercel tự ghi đè, khách không giả được); nếu không có thì lấy phần tử CUỐI của `x-forwarded-for`. KHÔNG lấy phần tử đầu — khách tự gửi header đó để giả IP và né giới hạn đăng nhập. Bộ giới hạn tốc độ nằm trong RAM của từng instance serverless nên chỉ là lớp giảm thiểu, không phải chốt chặn tuyệt đối.
+- Đăng nhập: `identifier` / `password` cắt độ dài (254 / 72 byte) trước khi băm; thiếu hoặc sai kiểu → 401, không 500. Đổi mật khẩu bị giới hạn 8 lần / 10 phút mỗi tài khoản.
+- `JWT_SECRET` và `ENCRYPTION_KEY` không được trùng nhau (`config.problems`).
+- Key AI chỉ nằm trong `private/<uid>/vault.json` (AES-256-GCM, AAD = uid). Frontend không bao giờ nhận lại key (chỉ `keySet`). Refresh token vẫn nằm ở `localStorage` (GitHub Pages ↔ Vercel khác origin nên không dùng cookie HttpOnly được) → tuyệt đối không chèn HTML/JS không kiểm soát vào trang (luôn dùng `safeHtml()`).
+- Test: `backend/test/run.js` → nhóm "Phiên đăng nhập & nơi lưu key".

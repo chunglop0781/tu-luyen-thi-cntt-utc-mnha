@@ -62,6 +62,7 @@ function problems(cfg) {
   if (!cfg.owner) p.push('Thiếu GITHUB_OWNER');
   if (cfg.jwtSecret.length < 32) p.push('JWT_SECRET phải dài >= 32 ký tự');
   if (cfg.encKey.length < 32) p.push('ENCRYPTION_KEY phải dài >= 32 ký tự');
+  if (cfg.jwtSecret && cfg.jwtSecret === cfg.encKey) p.push('JWT_SECRET và ENCRYPTION_KEY không được trùng nhau (lộ một cái là mất cả hai lớp bảo vệ)');
   if (!cfg.origins.length && !cfg.allowLocalhost) p.push('Thiếu FRONTEND_ORIGINS (origin của GitHub Pages)');
   return p;
 }

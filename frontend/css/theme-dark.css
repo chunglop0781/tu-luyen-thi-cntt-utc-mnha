@@ -394,3 +394,4 @@ html[data-theme="dark"] .cluster-box{background:#2a2510;border:1px solid #be9203
 html[data-theme="dark"] .cluster-label{color:#f58f41}
 html[data-theme="dark"] .cluster-text{color:#b2c1d8}
 
+html[data-theme="dark"] .sp-item.sp-custom{border-top:1px dashed #30363e;color:#a5b4fc}

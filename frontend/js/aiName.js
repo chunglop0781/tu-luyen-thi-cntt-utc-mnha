@@ -10,6 +10,21 @@ export const pickerAttrs = (kind) => (kind === 'model'
   ? { 'data-subject-picker': '', 'data-sp-compact': '', 'data-sp-placeholder': '— Mặc định —', 'data-sp-search': 'Tìm model...', 'data-sp-empty': 'Không tìm thấy model nào', 'data-sp-unit': 'model', 'data-sp-unit-short': 'model' }
   : { 'data-subject-picker': '', 'data-sp-compact': '', 'data-sp-placeholder': '— Chọn AI —', 'data-sp-search': 'Tìm AI (tên, nhà cung cấp)...', 'data-sp-empty': 'Không tìm thấy AI nào', 'data-sp-unit': 'AI', 'data-sp-unit-short': 'AI' });
 
+/** Ô chọn model có tìm kiếm + cho nhập tay (thay <input list=datalist> — danh sách gốc của trình duyệt xấu, không tìm được).
+ *  allowCustom=false → chỉ chọn trong danh sách. Model đã lưu mà không có trong danh sách vẫn được giữ làm một lựa chọn. */
+export function modelSelect(p, saved, { allowCustom = p.allowCustomModel, defaultLabel = `Mặc định (${p.defaultModel})`, ...attrs } = {}) {
+  const list = (p.models || []).slice();
+  if (saved && !list.includes(saved)) list.unshift(saved);
+  const sel = document.createElement('select');
+  sel.setAttribute('aria-label', 'Model');
+  for (const [k, v] of Object.entries({ ...pickerAttrs('model'), ...(allowCustom ? { 'data-sp-custom': '', 'data-sp-search': 'Tìm hoặc gõ tên model...' } : {}), ...attrs })) sel.setAttribute(k, v);
+  const add = (value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; sel.appendChild(o); };
+  add('', defaultLabel);
+  list.forEach((m) => add(m, m));
+  sel.value = saved || '';
+  return sel;
+}
+
 /** Bộ chọn cần phần tử đã nằm trong trang (đọc style của cha) → đợi tới khi gắn vào DOM rồi mới nâng cấp. */
 export function enhancePickers(root) {
   let n = 0;

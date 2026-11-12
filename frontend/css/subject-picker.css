@@ -65,3 +65,5 @@
 .sp.sp-compact .sp-list { max-height: 180px; }      /* 5 dòng x 36px, nhiều hơn thì kéo thanh cuộn */
 .sp.sp-compact .sp-btn[disabled] { opacity: .7; }
 @media (max-width: 700px) { .sp.sp-compact { width: auto; flex: 1; min-width: 0; } }
+
+.sp-item.sp-custom { border-top: 1px dashed #d1d5db; color: #4338ca; font-weight: 600; }

@@ -1,4 +1,5 @@
 import { get, put, post, patch, del, session, API, logout } from '../api.js';
+import { modelSelect, enhancePickers } from '../aiName.js';
 import { h, action, toast, fmtDate, confirmBox, withToggle } from '../ui.js';
 
 export async function settingsPage(ctx) {
@@ -64,13 +65,7 @@ export async function aiSettingsPage() {
     const isDefault = vault.provider === p.id;
     const result = h('div');
     const key = h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: it.keySet ? '•••••• (đã lưu — nhập để thay)' : `API key ${p.label}${p.keyPlaceholder ? ` (${p.keyPlaceholder})` : ''}` });
-    let modelEl, extra = null;
-    if (p.allowCustomModel) {
-      modelEl = h('input', { list: `models-${p.id}`, value: it.model, placeholder: `Mặc định: ${p.defaultModel}`, maxlength: 100, autocomplete: 'off', 'aria-label': 'Model' });
-      extra = h('datalist', { id: `models-${p.id}` }, ...p.models.map((m) => h('option', { value: m })));
-    } else {
-      modelEl = h('select', { 'aria-label': 'Model' }, h('option', { value: '', selected: !it.model }, `Mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === it.model }, m)));
-    }
+    const modelEl = modelSelect(p, it.model || '');   // ô chọn model có tìm kiếm; gõ tên lạ → "Dùng …" (nếu nhà cho phép)
     // ★ Tên AI: tự đặt / sửa để sau này tìm lại (hiện trong ô chọn AI có tìm kiếm ở trang làm bài & chấm bài)
     const nameEl = h('input', { value: it.name || '', placeholder: 'Đặt tên để dễ tìm, vd: Key Gemini của tôi', maxlength: 60, autocomplete: 'off', 'aria-label': 'Tên AI' });
     const nameBtn = h('button', { class: 'btn small', type: 'button' }, it.name ? '✏️ Sửa tên' : '💾 Đặt tên');
@@ -111,7 +106,7 @@ export async function aiSettingsPage() {
         h('div', { class: 'row' }, editBtn, delBtn)),
       p.baseUrl ? h('p', { class: 'muted' }, h('code', null, p.baseUrl + p.chatPath)) : h('p', { class: 'muted' }, 'API Google Gemini (generateContent)'),
       field('Tên AI', h('div', { class: 'row' }, nameEl, nameBtn), '(tự đặt để dễ tìm — để trống = dùng tên nhà cung cấp)'),
-      h('div', { class: 'ai-grid' }, field('Model', modelEl, p.allowCustomModel ? '(chọn gợi ý hoặc tự gõ)' : ''), field(`API key ${p.label}`, withToggle(key))), extra,
+      h('div', { class: 'ai-grid' }, field('Model', modelEl, p.allowCustomModel ? '(chọn gợi ý hoặc tự gõ)' : ''), field(`API key ${p.label}`, withToggle(key))),
       h('div', { class: 'row' }, saveBtn, testBtn, defBtn, it.keySet ? rmKey : null), shareBox, result);
     return card;
   }
@@ -166,6 +161,7 @@ export async function aiSettingsPage() {
         h('p', { class: 'muted' }, 'Tự thêm nhà cung cấp mình dùng (Google Gemini có sẵn). Mỗi tài khoản có danh sách và key riêng — danh sách lưu ở ', h('code', null, 'AI-database/<id tài khoản>/index.json'), ', key được mã hoá. Nhà cung cấp mặc định dùng khi chấm tự luận / phân tích trắc nghiệm; ở từng bài vẫn chọn nhà khác được.'),
         h('div', { class: 'row' }, addBtn, presetBtns.length ? h('span', { class: 'muted' }, 'hoặc thêm nhanh theo mẫu:') : null, ...presetBtns), slot),
       ...providers.map(providerCard));
+    enhancePickers(root);
   }
   draw();
   return root;

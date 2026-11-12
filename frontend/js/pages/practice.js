@@ -1,7 +1,7 @@
 import { get, put, post, newId, imageCtx } from '../api.js';
 import { h, action, toast, richOrHtml } from '../ui.js';
 import { historyBtn, historyTarget } from '../historyBtn.js';
-import { aiTitle, pickerAttrs, enhancePickers } from '../aiName.js';
+import { aiTitle, pickerAttrs, enhancePickers, modelSelect } from '../aiName.js';
 import { lockSeek } from '../alarmSeekLock.js';
 
 const draftKey = (t, id) => `utc.draft.${t}.${id}`;
@@ -77,11 +77,10 @@ export async function essayPractice(ctx, id, opts = {}) {
     const p = prov(), saved = (ai.vault.items[cur] || {}).model || '';
     provSel = h('select', { id: 'epProv', 'aria-label': 'AI', ...pickerAttrs('ai') }, ...ready.map((x) => h('option', { value: x.id, selected: x.id === cur }, aiTitle(x, ai.vault.items[x.id]))));
     provSel.addEventListener('change', () => { cur = provSel.value; connected = false; lockUi(); drawSel(); setPill('', 'Chưa kiểm tra', 'Đổi nhà cung cấp — hãy kiểm tra lại kết nối.'); });
-    if (p.allowCustomModel) modelEl = h('input', { id: 'epModel', list: 'ep-models', value: saved, placeholder: `Model (mặc định: ${p.defaultModel})`, maxlength: 100, autocomplete: 'off', 'aria-label': 'Model' });
-    else modelEl = h('select', { id: 'epModel', 'aria-label': 'Model', ...pickerAttrs('model') }, h('option', { value: '', selected: !saved }, `Mặc định (${p.defaultModel})`), ...p.models.map((m) => h('option', { value: m, selected: m === saved }, m)));
+    modelEl = modelSelect(p, saved); modelEl.id = 'epModel';
     modelEl.addEventListener('change', () => { if (connected) { connected = false; lockUi(); setPill('', 'Chưa kiểm tra', 'Đổi model — hãy kiểm tra lại kết nối.'); } });
     selBox.replaceChildren(h('div', { class: 'field' }, h('label', { for: 'epProv' }, '🔑 AI Key:'), provSel), h('div', { class: 'field' }, h('label', { for: 'epModel' }, '🤖 Model:'), modelEl),
-      ...(p.allowCustomModel ? [h('datalist', { id: 'ep-models' }, ...p.models.map((m) => h('option', { value: m })))] : []), rndBtn);
+      rndBtn);
     rndBtn.hidden = !(p.models && p.models.length);
     enhancePickers(selBox);          // ô chọn AI / model có tìm kiếm (chép từ subjectPicker.js của luyen-thi)
   };

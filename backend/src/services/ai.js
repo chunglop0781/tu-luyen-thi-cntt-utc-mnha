@@ -1,17 +1,24 @@
 'use strict';
 /** Gọi AI bằng khoá của CHÍNH người dùng: Gemini (REST) hoặc API kiểu OpenAI (vilao.ai, ChatGPT, DeepSeek, OpenRouter). */
 const { HttpError } = require('../http');
-const { assertPublicHost } = require('./netguard');
+const { assertPublicHost, safeFetch } = require('./netguard');
 const { DEFAULT_SYSTEM_PROMPT } = require('../aiModels');
 
 const SYSTEM = DEFAULT_SYSTEM_PROMPT;
 
-function apiError(status, body, p, raw) {
-  const msg = (body && body.error && (body.error.message || (typeof body.error === 'string' && body.error))) || (body && body.message) || String(raw || '').slice(0, 200) || 'không rõ';
+/** regex do người dùng nhập: chỉ thử trên chuỗi ngắn, lỗi/nghi ReDoS (lặp lồng nhau) → coi như không khớp. */
+function safeTest(src, text) {
+  try { if (/(\([^)]*[+*][^)]*\)|\[[^\]]*\][+*])[+*{]/.test(src)) return false; return new RegExp(src, 'i').test(String(text).slice(0, 300)); } catch { return false; }
+}
+
+function apiError(status, body, p, raw, apiKey) {
+  let msg = (body && body.error && (body.error.message || (typeof body.error === 'string' && body.error))) || (body && body.message) || String(raw || '').slice(0, 200) || 'không rõ';
+  msg = String(msg).slice(0, 300);
+  if (apiKey && apiKey.length >= 8) msg = msg.split(apiKey).join('***');   // không để nhà cung cấp phản chiếu lại key ra màn hình
   const e = (s, m, c) => { const x = new HttpError(s, m, c); x.upstream = status; return x; };
   // KHÔNG trả 401 cho trình duyệt: 401 nghĩa là "hết phiên đăng nhập" và sẽ làm đăng xuất nhầm
   if (status === 401 || status === 403) {
-    if (p.subscribeRegex && status === 403 && new RegExp(p.subscribeRegex, 'i').test(msg)) return e(400, `${p.label}: key chưa đăng ký model này (${msg})`, 'AI_MODEL');
+    if (p.subscribeRegex && status === 403 && safeTest(p.subscribeRegex, msg)) return e(400, `${p.label}: key chưa đăng ký model này (${msg})`, 'AI_MODEL');
     return e(400, `${p.label}: key không hợp lệ hoặc không có quyền (${status}) — ${msg}`, 'AI_KEY');
   }
   if (status === 404) return e(400, `${p.label}: không tìm thấy model hoặc địa chỉ API (${msg})`, 'AI_MODEL');
@@ -38,7 +45,7 @@ async function once({ p, model, apiKey, prompt, json, fetchImpl, timeoutMs, look
     const err = new HttpError(504, timeout ? `${p.label} không phản hồi kịp (${Math.round(timeoutMs / 1000)}s)` : `${p.label}: không kết nối được (${e.message})`, 'AI_TIMEOUT'); err.upstream = 504; throw err;
   }
   const raw = await res.text(); let body = null; try { body = raw ? JSON.parse(raw) : null; } catch { body = null; }
-  if (!res.ok) throw apiError(res.status, body, p, raw);
+  if (!res.ok) throw apiError(res.status, body, p, raw, apiKey);
   let text = '';
   if (p.kind === 'gemini') text = ((body && body.candidates && body.candidates[0] && body.candidates[0].content && body.candidates[0].content.parts) || []).map((x) => x.text || '').join('');
   else { const c = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content; text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => (x && x.text) || '').join('') : ''; }
@@ -48,8 +55,9 @@ async function once({ p, model, apiKey, prompt, json, fetchImpl, timeoutMs, look
 
 /** → { text, model, provider, fallbackFrom? }. Gemini: model chính quá tải/timeout → thử tối đa 2 model dự phòng.
  *  `budgetMs`: tổng thời gian cho mọi lần thử (Vercel giới hạn 60s/hàm) — hết ngân sách thì không thử tiếp. */
-async function callAi({ provider, model, apiKey, prompt, json = false, fetchImpl = fetch, timeoutMs = 45000, budgetMs = 52000, lookup }) {
+async function callAi({ provider, model, apiKey, prompt, json = false, fetchImpl, timeoutMs = 45000, budgetMs = 52000, lookup }) {
   const chain = [model];
+  fetchImpl = fetchImpl || (provider.kind === 'gemini' ? fetch : safeFetch);   // nhà kiểu OpenAI (địa chỉ do người dùng nhập) → safeFetch chống DNS-rebinding
   if (provider.kind === 'gemini') for (const m of provider.fallbackModels || []) if (!chain.includes(m) && chain.length < 3) chain.push(m);
   const t0 = Date.now(); let last;
   for (let i = 0; i < chain.length; i++) {
