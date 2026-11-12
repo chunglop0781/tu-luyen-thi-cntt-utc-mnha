@@ -39,6 +39,7 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   const auth = createAuth({ cfg, store, mailer });
   const content = createContent({ cfg, store, images, fetchImpl: aiFetch, lookup: dnsLookup });
   const allow = limiter();
+  const LOGIN_MAX_FAILS = 5, LOGIN_LOCK_MS = 10 * 60e3, loginFails = new Map();
   const router = new Router();
 
   // IP thật của khách: Vercel tự ghi đè x-vercel-forwarded-for / x-real-ip (khách không giả được).
@@ -86,7 +87,25 @@ function createApp({ env = process.env, fetchImpl, aiFetch, mailer: mailerImpl, 
   });
   router.post('/api/auth/login', async (ctx) => {
     if (!allow('login:' + ip(ctx.req), 20, 600e3) || !allow('loginu:' + String(ctx.body.identifier !== undefined ? ctx.body.identifier : ctx.body.username || '').trim().toLowerCase().slice(0, 254), 10, 600e3)) throw new HttpError(429, 'Thử đăng nhập quá nhiều lần, đợi vài phút', 'RATE');
-    return { ok: true, ...(await auth.login(ctx.body, ua(ctx.req))) };
+    // Đếm số lần sai theo (IP + tài khoản): báo "còn N lần thử", sai LOGIN_MAX_FAILS lần thì khoá tạm (RAM, tốt nhất có thể trên serverless)
+    const who = String(ctx.body.identifier !== undefined ? ctx.body.identifier : ctx.body.username || '').trim().toLowerCase().slice(0, 254);
+    const fkey = ip(ctx.req) + '|' + who, now = Date.now();
+    const lockErr = (sec) => { const e = new HttpError(429, `Bạn đã nhập sai ${LOGIN_MAX_FAILS}/${LOGIN_MAX_FAILS} lần. Tạm khoá đăng nhập, vui lòng thử lại sau ${sec >= 60 ? Math.ceil(sec / 60) + ' phút' : sec + ' giây'}.`, 'LOGIN_LOCKED'); e.retryAfter = sec; return e; };
+    for (const [k, v] of loginFails) if (v.until ? v.until <= now : now - v.at > LOGIN_LOCK_MS) loginFails.delete(k);
+    let f = loginFails.get(fkey);
+    if (f && f.until > now) throw lockErr(Math.ceil((f.until - now) / 1000));
+    try {
+      const out = await auth.login(ctx.body, ua(ctx.req));
+      loginFails.delete(fkey);
+      return { ok: true, ...out };
+    } catch (e) {
+      if (!(e instanceof HttpError) || e.code !== 'BAD_CREDENTIALS') throw e;
+      if (loginFails.size > 5000) loginFails.clear();
+      f = { n: ((f && f.n) || 0) + 1, at: now, until: 0 };
+      if (f.n >= LOGIN_MAX_FAILS) { f.until = now + LOGIN_LOCK_MS; loginFails.set(fkey, f); throw lockErr(Math.ceil(LOGIN_LOCK_MS / 1000)); }
+      loginFails.set(fkey, f);
+      throw new HttpError(401, `${e.message}. Bạn còn ${LOGIN_MAX_FAILS - f.n} lần thử`, 'BAD_CREDENTIALS');
+    }
   });
   router.post('/api/auth/refresh', async (ctx) => ({ ok: true, ...(await auth.refresh(ctx.body.refreshToken)) }));
   router.post('/api/auth/logout', async (ctx) => { await auth.logout(ctx.body.refreshToken); return { ok: true }; });

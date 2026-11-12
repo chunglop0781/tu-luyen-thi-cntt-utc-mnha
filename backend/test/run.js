@@ -904,6 +904,16 @@ async function t(name, fn) { try { await fn(); passed++; console.log('  ✓', na
     const c2 = []; for (let i = 0; i < 30; i++) c2.push((await call('POST', '/api/auth/login', { body: { username: 'other' + i, password: 'matkhau123' }, headers: { 'X-Forwarded-For': `10.2.${i}.${i}, 203.0.113.50` } })).status);
     assert.ok(c2.slice(20).every((c) => c === 429), c2.join(','));
   });
+  await t('đăng nhập sai báo "còn N lần thử", sai 5 lần thì khoá 429, đúng mật khẩu xoá bộ đếm', async () => {
+    const h = { 'X-Vercel-Forwarded-For': '203.0.113.77' }; await reg('lockme'); const bad = () => call('POST', '/api/auth/login', { body: { username: 'lockme', password: 'sai-roi-nha' }, headers: h });
+    for (const left of [4, 3]) { const r = await bad(); assert.equal(r.status, 401); assert.equal(r.json.code, 'BAD_CREDENTIALS'); assert.match(r.json.error, new RegExp('còn ' + left + ' lần')); }
+    assert.equal((await call('POST', '/api/auth/login', { body: { username: 'lockme', password: 'matkhau123' }, headers: h })).status, 200);   // đúng → reset
+    const r1 = await bad(); assert.match(r1.json.error, /còn 4 lần/);
+    for (let i = 0; i < 3; i++) await bad();
+    const lock = await bad(); assert.equal(lock.status, 429); assert.equal(lock.json.code, 'LOGIN_LOCKED'); assert.match(lock.json.error, /5\/5/);
+    assert.equal((await call('POST', '/api/auth/login', { body: { username: 'lockme', password: 'matkhau123' }, headers: h })).status, 429);   // đang khoá: kể cả đúng mật khẩu
+    assert.equal((await call('POST', '/api/auth/login', { body: { username: 'lockme', password: 'matkhau123' }, headers: { 'X-Vercel-Forwarded-For': '203.0.113.78' } })).status, 200);   // thiết bị khác không bị ảnh hưởng
+  });
   await t('JWT_SECRET trùng ENCRYPTION_KEY bị báo lỗi cấu hình', async () => {
     const { config, problems } = require('../src/config');
     assert.ok(problems(config({ ...env, ENCRYPTION_KEY: env.JWT_SECRET })).some((x) => /trùng/.test(x)));
