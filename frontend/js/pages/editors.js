@@ -1,6 +1,7 @@
 import { get, put, post, uploadImage, newId } from '../api.js';
 import { h, action, toast, imagePickerButton } from '../ui.js';
 import { promptPicker } from './prompts.js';
+import { enhancePickers } from '../aiName.js';   // gắn SubjectPicker (ô chọn có tìm kiếm chép nguyên từ luyen-thi)
 
 const field = (label, el, hint) => h('label', { class: 'field' }, h('span', null, label), el, hint ? h('small', { class: 'muted' }, hint) : null);
 
@@ -22,8 +23,15 @@ export async function essayEditor(ctx, id) {
   const [subjects, picker] = await Promise.all([subjectsList(), promptPicker('essay', item && item.promptId)]);
   const e = item || { title: '', subject: '', prompt: '', modelAnswer: '', maxScore: 10, rubric: [] };
   const title = h('input', { value: e.title, maxlength: 200, required: true, placeholder: 'VD: So sánh TCP và UDP' });
-  const dl = h('datalist', { id: 'subj' }, subjects.map((s) => h('option', { value: s })));
-  const subject = h('input', { value: e.subject, list: 'subj', maxlength: 60, placeholder: 'VD: Mạng máy tính' });
+  // Môn / chủ đề: <select data-subject-picker> giống ô "Môn học" của luyen-thi (có ô tìm kiếm, đếm số môn);
+  // data-sp-custom cho phép gõ tên môn chưa có → hiện mục "✏️ Dùng “…” (nhập tay)".
+  const subject = document.createElement('select');
+  for (const [k, v] of Object.entries({ 'data-subject-picker': '', 'data-sp-custom': '', 'data-sp-placeholder': '— Chọn môn / chủ đề —', 'data-sp-search': 'Tìm hoặc gõ tên môn mới...', 'data-sp-empty': 'Không tìm thấy môn nào', 'data-sp-unit': 'môn / chủ đề', 'data-sp-unit-short': 'môn' })) subject.setAttribute(k, v);
+  const subjOpts = [...new Set([...subjects, e.subject].filter(Boolean))];
+  [['', '— Chọn môn / chủ đề —'], ...subjOpts.map((x) => [x, x])].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; subject.appendChild(o); });
+  subject.value = e.subject || '';
+  // dùng div thay label để bấm vào ô chọn không bị label chuyển sự kiện lung tung
+  const subjectField = h('div', { class: 'field' }, h('span', null, 'Môn / chủ đề'), subject);
   const maxScore = h('input', { type: 'number', min: 1, max: 100, value: e.maxScore });
   const untimed = h('input', { type: 'checkbox', checked: item ? item.duration == null : true });
   const duration = h('input', { type: 'number', min: 1, max: 600, step: 1, value: (item && item.duration) || 45, disabled: untimed.checked });
@@ -41,7 +49,7 @@ export async function essayEditor(ctx, id) {
   const save = h('button', { class: 'btn primary', type: 'submit' }, 'Lưu bài');
   const form = h('form', { class: 'card stack' },
     h('h2', null, isNew ? 'Tạo bài tự luận' : 'Sửa bài tự luận'),
-    field('Tiêu đề', title), h('div', { class: 'row' }, field('Môn / chủ đề', subject), field('Thang điểm', maxScore)), dl,
+    field('Tiêu đề', title), h('div', { class: 'row' }, subjectField, field('Thang điểm', maxScore)),
     h('div', { class: 'row' }, field('⏱ Thời gian làm bài (phút)', duration), h('label', { class: 'row opt' }, untimed, h('span', null, 'Không đếm giờ'))),
     picker.el,
     promptGuide(),
@@ -54,5 +62,6 @@ export async function essayEditor(ctx, id) {
     await put(`/api/essays/${id}`, { title: title.value, subject: subject.value, maxScore: Number(maxScore.value), prompt: prompt.value, modelAnswer: model.value, rubric: rubric.filter((r) => r.name.trim()), duration: untimed.checked ? null : Number(duration.value), timerMode: untimed.checked ? 'untimed' : 'timed', promptId: picker.value() });
     toast('Đã lưu', 'ok'); ctx.go('/');
   }));
+  enhancePickers(form);   // nâng cấp <select> môn thành ô chọn có tìm kiếm khi form đã nằm trong trang
   return form;
 }
